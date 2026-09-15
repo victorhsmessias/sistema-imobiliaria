@@ -1,0 +1,182 @@
+.page {
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(420px, 1fr);
+  background: var(--surface);
+}
+
+/* ---------- Lado grafite: a cidade ---------- */
+
+.stage {
+  display: flex;
+  flex-direction: column;
+  gap: 40px;
+  padding: 32px 56px 48px;
+  background:
+    radial-gradient(120% 80% at 30% 45%, var(--chrome-2) 0%, transparent 60%),
+    var(--chrome);
+  color: var(--chrome-ink);
+}
+
+.brand,
+.mobileBrand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.brandName {
+  font-size: 16px;
+  font-weight: 700;
+  font-variation-settings: var(--wide);
+  letter-spacing: -0.01em;
+}
+
+.city {
+  padding-left: 10px;
+  border-left: 1px solid var(--chrome-line);
+  font-size: 13px;
+  color: var(--chrome-ink-2);
+}
+
+.stageBody {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 48px;
+  max-width: 560px;
+}
+
+.headline {
+  font-size: 30px;
+  line-height: 1.12;
+  font-weight: 650;
+  font-variation-settings: var(--wide);
+  letter-spacing: -0.02em;
+  color: #ffffff;
+  max-width: 20ch;
+  text-wrap: balance;
+}
+
+.facts {
+  list-style: none;
+  margin: 28px 0 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 20px;
+}
+
+.facts li {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 14px;
+  border-top: 1px solid var(--chrome-line);
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--chrome-ink-2);
+}
+
+.facts li > span:last-child {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.facts strong {
+  color: var(--chrome-ink);
+  font-weight: 600;
+}
+
+.factIcon {
+  display: inline-flex;
+  color: var(--chrome-ink);
+}
+
+/* ---------- Lado claro: o formulario ---------- */
+
+.formSide {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 48px 56px;
+}
+
+.mobileBrand {
+  display: none;
+}
+
+.formWrap {
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+  width: 100%;
+  max-width: 360px;
+  margin: 0 auto;
+}
+
+.heading {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.form :global(.input) {
+  min-height: 42px;
+}
+
+.form button {
+  margin-top: 6px;
+  min-height: 42px;
+}
+
+.help {
+  padding-top: 20px;
+  border-top: 1px solid var(--line);
+}
+
+@media (max-width: 1100px) {
+  .facts {
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
+
+  .facts li {
+    flex-direction: row;
+    padding: 12px 0;
+  }
+}
+
+@media (max-width: 900px) {
+  .page {
+    grid-template-columns: 1fr;
+  }
+
+  .stage {
+    display: none;
+  }
+
+  .formSide {
+    justify-content: flex-start;
+    gap: 48px;
+    min-height: 100vh;
+    padding: 24px 20px;
+  }
+
+  .mobileBrand {
+    display: flex;
+  }
+
+  .formWrap {
+    max-width: none;
+    margin: 0;
+  }
+}

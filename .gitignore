@@ -1,0 +1,25 @@
+node_modules/
+dist/
+build/
+.next/
+out/
+coverage/
+
+.env
+.env.local
+.env.*.local
+!.env.example
+
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# artefatos locais de mídia gerados em dev
+tmp/
+.uploads/

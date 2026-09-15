@@ -1,0 +1,63 @@
+name: sistema-imob-dev
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: imob_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: imob
+    ports:
+      # 5432 e 5433 ja estao ocupadas nesta maquina (Postgres local e o
+      # container imobiliaria-db de outro projeto). 5434 fica livre.
+      - '5434:5432'
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      # Roda uma unica vez, na criacao do volume: cria os roles app_migrator e app_user.
+      # O mesmo arquivo deve ser executado manualmente no Postgres de producao.
+      - ../packages/db/sql/00_bootstrap_roles.sql:/docker-entrypoint-initdb.d/00_bootstrap_roles.sql:ro
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres -d imob']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  minio:
+    # Docker Hub nao serve mais minio/minio publicamente; o registro oficial e o quay.io.
+    image: quay.io/minio/minio:latest
+    container_name: imob_minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports:
+      - '9000:9000'
+      - '9001:9001'
+    volumes:
+      - miniodata:/data
+    healthcheck:
+      test: ['CMD', 'mc', 'ready', 'local']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # Cria o bucket de midia uma vez e encerra.
+  minio-init:
+    image: quay.io/minio/mc:latest
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 minioadmin minioadmin;
+      mc mb --ignore-existing local/imob-media;
+      mc anonymous set none local/imob-media;
+      echo 'bucket imob-media pronto (privado)';
+      "
+
+volumes:
+  pgdata:
+  miniodata:

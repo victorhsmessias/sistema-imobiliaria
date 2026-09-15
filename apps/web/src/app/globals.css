@@ -1,0 +1,524 @@
+/* ==========================================================================
+   Tokens
+
+   Uma familia (Archivo) e o eixo de largura como voz: expandida para titulos,
+   bairro e valor; largura normal para texto; algarismos tabulares nos dados.
+
+   A moldura e grafite. Nao ha cor por regiao da cidade: a localizacao da rede
+   e o bairro, que aparece por extenso.
+   ========================================================================== */
+
+:root {
+  --ground: #eef1f4;
+  --surface: #ffffff;
+  --surface-2: #f6f8fa;
+  --surface-3: #e6eaef;
+  --ink: #132030;
+  --ink-2: #48566a;
+  --ink-3: #647185;
+  --line: #dde2e8;
+  --line-strong: #c3cbd5;
+
+  --chrome: #132030;
+  --chrome-2: #1d2d42;
+  --chrome-line: #2a3b52;
+  --chrome-ink: #eef2f7;
+  --chrome-ink-2: #9aa8ba;
+
+  --action: #132030;
+  --action-hover: #25384f;
+  --link: #2458c6;
+  --focus: #2f6fe4;
+  --focus-ring: 0 0 0 3px rgba(47, 111, 228, 0.28);
+
+  --danger: #b4232f;
+  --danger-soft: #fbe9ea;
+  --ok: #157a42;
+  --ok-soft: #e2f3e8;
+  --warn: #99580a;
+  --warn-soft: #fbefd9;
+  --info: #2458c6;
+  --info-soft: #e5edfb;
+
+  --radius-s: 6px;
+  --radius-m: 10px;
+
+  --shadow-pop: 0 14px 32px -10px rgba(19, 32, 48, 0.28), 0 2px 6px rgba(19, 32, 48, 0.08);
+  --shadow-bar: 0 -8px 24px -12px rgba(19, 32, 48, 0.25);
+
+  --font: var(--font-archivo), system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --wide: 'wdth' 125;
+  --semi-wide: 'wdth' 112;
+  --narrow: 'wdth' 92;
+
+  --topbar-h: 56px;
+}
+
+/* ==========================================================================
+   Base
+   ========================================================================== */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--ground);
+  color: var(--ink);
+  font-family: var(--font);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+h1,
+h2,
+h3,
+p {
+  margin: 0;
+}
+
+h1,
+h2,
+h3 {
+  line-height: 1.15;
+  font-weight: 650;
+}
+
+a {
+  color: var(--link);
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+img {
+  max-width: 100%;
+  display: block;
+}
+
+svg {
+  flex: none;
+}
+
+:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+::selection {
+  background: rgba(47, 111, 228, 0.2);
+}
+
+.num {
+  font-variant-numeric: tabular-nums;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.page-title {
+  font-size: 28px;
+  font-weight: 650;
+  font-variation-settings: var(--wide);
+  letter-spacing: -0.015em;
+  line-height: 1.1;
+  text-wrap: balance;
+}
+
+.section-title {
+  font-size: 15px;
+  font-weight: 650;
+  font-variation-settings: var(--semi-wide);
+  letter-spacing: -0.005em;
+}
+
+.lead {
+  color: var(--ink-2);
+  max-width: 62ch;
+}
+
+.panel {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-m);
+}
+
+@media (max-width: 720px) {
+  .page-title {
+    font-size: 23px;
+  }
+}
+
+/* ==========================================================================
+   Controles
+   ========================================================================== */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 38px;
+  padding: 0 14px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-s);
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1;
+  text-decoration: none;
+  cursor: pointer;
+  white-space: nowrap;
+  box-shadow: 0 1px 0 rgba(19, 32, 48, 0.04);
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease,
+    color 120ms ease;
+}
+
+.btn:hover {
+  border-color: var(--ink-3);
+  background: var(--surface-2);
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-primary {
+  background: var(--action);
+  border-color: var(--action);
+  color: #ffffff;
+}
+
+.btn-primary:hover {
+  background: var(--action-hover);
+  border-color: var(--action-hover);
+}
+
+.btn-primary:disabled:hover {
+  background: var(--action);
+}
+
+.btn-danger {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 35%, var(--line));
+}
+
+.btn-danger:hover {
+  border-color: var(--danger);
+  background: var(--danger-soft);
+}
+
+.btn-quiet {
+  border-color: transparent;
+  background: transparent;
+  color: var(--ink-2);
+  box-shadow: none;
+  padding: 0 10px;
+}
+
+.btn-quiet:hover {
+  color: var(--ink);
+  border-color: transparent;
+  background: var(--surface-3);
+}
+
+.btn-sm {
+  min-height: 30px;
+  padding: 0 10px;
+  font-size: 13px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.field > label,
+.field-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.input {
+  width: 100%;
+  min-height: 38px;
+  padding: 7px 11px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-s);
+  background: var(--surface);
+  font-size: 14px;
+  transition:
+    border-color 120ms ease,
+    box-shadow 120ms ease;
+}
+
+.input::placeholder {
+  color: var(--ink-3);
+  opacity: 1;
+}
+
+.input:hover {
+  border-color: var(--ink-3);
+}
+
+.input:focus-visible {
+  outline: 0;
+  border-color: var(--focus);
+  box-shadow: var(--focus-ring);
+}
+
+.input[aria-invalid='true'] {
+  border-color: var(--danger);
+}
+
+.input[aria-invalid='true']:focus-visible {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--danger) 22%, transparent);
+}
+
+textarea.input {
+  min-height: 116px;
+  resize: vertical;
+  line-height: 1.55;
+}
+
+select.input {
+  appearance: none;
+  padding-right: 34px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12' fill='none' stroke='%2348566a' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 4.5 6 7.5 9 4.5'/%3E%3C/svg%3E");
+  background-position: right 11px center;
+  background-size: 12px 12px;
+  background-repeat: no-repeat;
+  cursor: pointer;
+}
+
+.hint {
+  font-size: 13px;
+  color: var(--ink-2);
+}
+
+.error-text {
+  font-size: 13px;
+  color: var(--danger);
+  font-weight: 500;
+}
+
+.alert,
+.notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 11px 14px;
+  border-radius: var(--radius-s);
+  border: 1px solid;
+  font-size: 14px;
+}
+
+.alert {
+  border-color: color-mix(in srgb, var(--danger) 30%, transparent);
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.notice {
+  border-color: color-mix(in srgb, var(--ok) 30%, transparent);
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+
+/* Grupo segmentado: finalidade, quartos. Radios de verdade por baixo. */
+.segmented {
+  display: flex;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 8px;
+  background: var(--surface-3);
+}
+
+.segmented label {
+  flex: 1 1 0;
+  position: relative;
+  text-align: center;
+  cursor: pointer;
+}
+
+.segmented input {
+  position: absolute;
+  opacity: 0;
+  inset: 0;
+  cursor: pointer;
+}
+
+.segmented span {
+  display: block;
+  padding: 6px 8px;
+  border-radius: 5px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink-2);
+  transition:
+    background-color 120ms ease,
+    color 120ms ease;
+}
+
+.segmented label:hover span {
+  color: var(--ink);
+}
+
+.segmented input:checked + span {
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow:
+    0 1px 2px rgba(19, 32, 48, 0.12),
+    0 0 0 1px rgba(19, 32, 48, 0.04);
+}
+
+.segmented input:focus-visible + span {
+  outline: 2px solid var(--focus);
+  outline-offset: 0;
+}
+
+/* Chips alternaveis: tipos de imovel. */
+.toggle-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-s);
+  background: var(--surface);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease;
+}
+
+.toggle-chip:hover {
+  border-color: var(--ink-3);
+}
+
+.toggle-chip[aria-pressed='true'] {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: #ffffff;
+}
+
+/* Selos: status, visibilidade na rede. Sempre ponto + texto, nunca so cor. */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px 2px 7px;
+  border-radius: 999px;
+  background: var(--surface-3);
+  color: var(--ink-2);
+  font-size: 12.5px;
+  font-weight: 600;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+
+.badge::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: currentColor;
+}
+
+.badge-ok {
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+
+.badge-warn {
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+
+.badge-info {
+  background: var(--info-soft);
+  color: var(--info);
+}
+
+.badge-outline {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+}
+
+.badge-outline::before {
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px currentColor;
+}
+
+/* Carregamento: blocos no formato do conteudo, em vez de texto solto. */
+.skeleton {
+  display: block;
+  border-radius: 4px;
+  background: linear-gradient(90deg, var(--surface-3) 0%, var(--surface-2) 50%, var(--surface-3) 100%);
+  background-size: 200% 100%;
+  animation: skeleton 1.4s ease-in-out infinite;
+}
+
+@keyframes skeleton {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: -100% 0;
+  }
+}
+
+/* Antes da sessao carregar: a moldura ja aparece, sem piscar branco. */
+.boot {
+  min-height: 100vh;
+}
+
+.boot::before {
+  content: '';
+  display: block;
+  height: var(--topbar-h);
+  background: var(--chrome);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition: none !important;
+    animation: none !important;
+  }
+}
