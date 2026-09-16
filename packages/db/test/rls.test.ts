@@ -226,6 +226,101 @@ describe('isolamento por tenant (RLS)', () => {
     });
   });
 
+  describe('conexoes (linha de dois donos)', () => {
+    /** Cria um pedido da Alfa num imovel da Beta, pelo oraculo. */
+    async function criarPedido(): Promise<string> {
+      return withOracle(async (oracle) => {
+        const { rows } = await oracle.query<{ id: string }>(
+          `INSERT INTO connection_requests
+             (property_id, requester_tenant_id, requester_user_id, owner_tenant_id, expires_at)
+           SELECT p.id, $1, u.id, $2, now() + interval '7 days'
+             FROM properties p, users u
+            WHERE p.tenant_id = $2 AND u.tenant_id = $1
+            LIMIT 1
+           RETURNING id`,
+          [alfa.id, beta.id],
+        );
+        return rows[0]!.id;
+      });
+    }
+
+    it('fail-closed: sem tenant no contexto, nao ha conexao nem trilha', async () => {
+      for (const table of ['connection_requests', 'connection_events']) {
+        const { rows } = await client.query<{ count: string }>(
+          `SELECT count(*)::text AS count FROM ${table}`,
+        );
+        expect(rows[0]?.count, `${table} deveria devolver zero sem tenant`).toBe('0');
+      }
+    });
+
+    it('as DUAS pontas enxergam a mesma linha, e mais ninguem', async () => {
+      const id = await criarPedido();
+      const carlos = tenants[2] as SeededTenant;
+
+      try {
+        for (const tenant of [alfa, beta]) {
+          const visto = await asTenant(client, tenant.id, async () => {
+            const { rows } = await client.query('SELECT id FROM connection_requests WHERE id = $1', [id]);
+            return rows;
+          });
+          expect(visto, `${tenant.slug} deveria ver a conexao`).toHaveLength(1);
+        }
+
+        const terceiro = await asTenant(client, carlos.id, async () => {
+          const { rows } = await client.query('SELECT id FROM connection_requests WHERE id = $1', [id]);
+          return rows;
+        });
+        expect(terceiro).toHaveLength(0);
+      } finally {
+        await withOracle((oracle) => oracle.query('DELETE FROM connection_requests WHERE id = $1', [id]));
+      }
+    });
+
+    it('nao da para pedir conexao em nome de outro parceiro', async () => {
+      // Os ids vem pelo oraculo: montar o INSERT com um SELECT sujeito ao RLS
+      // faria a consulta interna devolver zero linhas, e o teste passaria sem
+      // nunca ter exercitado a policy.
+      const { propertyId, betaUserId } = await withOracle(async (oracle) => {
+        const { rows } = await oracle.query<{ propertyId: string; betaUserId: string }>(
+          `SELECT p.id AS "propertyId", u.id AS "betaUserId"
+             FROM properties p, users u
+            WHERE p.tenant_id = $1 AND u.tenant_id = $1
+            LIMIT 1`,
+          [beta.id],
+        );
+        return rows[0]!;
+      });
+
+      // Alfa tentando registrar um pedido como se fosse a Beta.
+      await expect(
+        asTenant(client, alfa.id, () =>
+          client.query(
+            `INSERT INTO connection_requests
+               (property_id, requester_tenant_id, requester_user_id, owner_tenant_id, expires_at)
+             VALUES ($1, $2, $3, $4, now() + interval '7 days')`,
+            [propertyId, beta.id, betaUserId, alfa.id],
+          ),
+        ),
+      ).rejects.toThrow(/row-level security|violates/i);
+    });
+
+    it('a trilha da conexao e append-only', async () => {
+      await expect(
+        asTenant(client, alfa.id, () => client.query('UPDATE connection_events SET type = $1', ['approved'])),
+      ).rejects.toThrow(/permission denied/i);
+
+      await expect(
+        asTenant(client, alfa.id, () => client.query('DELETE FROM connection_events')),
+      ).rejects.toThrow(/permission denied/i);
+    });
+
+    it('conexao nao se apaga, muda de status', async () => {
+      await expect(
+        asTenant(client, alfa.id, () => client.query('DELETE FROM connection_requests')),
+      ).rejects.toThrow(/permission denied/i);
+    });
+  });
+
   it('RLS esta habilitado, e FORCE onde o dono tambem precisa ser barrado', async () => {
     const forced = [
       'properties',
@@ -234,6 +329,8 @@ describe('isolamento por tenant (RLS)', () => {
       'import_sources',
       'import_jobs',
       'import_items',
+      'connection_requests',
+      'connection_events',
     ];
     const all = [...forced, 'users', 'tenants', 'audit_log'];
 

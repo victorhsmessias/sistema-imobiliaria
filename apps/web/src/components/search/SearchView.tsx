@@ -133,6 +133,7 @@ export function SearchView() {
   const [error, setError] = useState<string | null>(null);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [elapsedMs, setElapsedMs] = useState<number | null>(null);
+  const [requestingId, setRequestingId] = useState<string | null>(null);
 
   const update = (patch: Partial<Filters>) => setFilters((current) => ({ ...current, ...patch }));
 
@@ -195,6 +196,34 @@ export function SearchView() {
       setError(reason instanceof ApiError ? reason.message : 'Não foi possível carregar mais.');
     } finally {
       setLoadingMore(false);
+    }
+  }
+
+  /**
+   * Pede conexao sem sair da busca.
+   *
+   * A lista e atualizada no lugar: recarregar a pagina inteira faria o
+   * corretor perder a posicao no resultado.
+   */
+  async function requestConnection(listingId: string) {
+    setRequestingId(listingId);
+    setError(null);
+    try {
+      const { connection } = await apiFetch<{ connection: { id: string; status: 'pending' } }>(
+        '/connections',
+        { method: 'POST', body: JSON.stringify({ listingId }) },
+      );
+      setItems((current) =>
+        current.map((item) =>
+          item.listingId === listingId
+            ? { ...item, connection: { id: connection.id, status: connection.status } }
+            : item,
+        ),
+      );
+    } catch (reason) {
+      setError(reason instanceof ApiError ? reason.message : 'Não foi possível pedir conexão agora.');
+    } finally {
+      setRequestingId(null);
     }
   }
 
@@ -499,6 +528,8 @@ export function SearchView() {
                 key={listing.listingId}
                 listing={listing}
                 pricePurpose={filters.purpose === 'any' ? undefined : filters.purpose}
+                onRequestConnection={(id) => void requestConnection(id)}
+                requesting={requestingId === listing.listingId}
               />
             ))}
           </ul>

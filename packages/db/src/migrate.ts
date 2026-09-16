@@ -56,6 +56,8 @@ const FORCED_TABLES = [
   'import_sources',
   'import_jobs',
   'import_items',
+  'connection_requests',
+  'connection_events',
 ];
 const RLS_TABLES = [...FORCED_TABLES, 'users', 'tenants', 'audit_log'];
 

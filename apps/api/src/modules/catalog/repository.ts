@@ -8,6 +8,7 @@ import {
   neighborhoods,
   neighborhoodSlugCandidates,
   sql,
+  type Tx,
 } from '@imob/db';
 
 /**
@@ -114,6 +115,39 @@ export async function resolveNeighborhood(
 
   const { aliasSlug, ...neighborhood } = aliasHit;
   return { neighborhood, matchedBy: 'alias', matchedSlug: aliasSlug };
+}
+
+export interface AliasResult {
+  aliasSlug: string;
+  created: boolean;
+  /** Nome do bairro que já usa essa grafia, quando há conflito. */
+  conflictWith: string | null;
+}
+
+/**
+ * Acrescenta uma grafia alternativa a um bairro existente.
+ *
+ * Passa por catalog_add_alias() (SECURITY DEFINER): app_user nao escreve no
+ * catalogo, e a funcao recusa criar bairro, renomear ou tomar o alias de
+ * outro bairro. Devolve null quando o bairro nao existe ou o slug e invalido.
+ *
+ * Recebe a transacao de withTenant(): a funcao registra a origem do alias
+ * pelo tenant da sessao e e fail-closed sem ele -- chamada fora de contexto,
+ * ela nao faz nada e devolve vazio.
+ */
+export async function addAlias(
+  tx: Tx,
+  neighborhoodId: string,
+  aliasSlug: string,
+): Promise<AliasResult | null> {
+  const { rows } = await tx.execute(
+    sql`SELECT * FROM catalog_add_alias(${neighborhoodId}::uuid, ${aliasSlug})`,
+  );
+  const row = rows[0] as
+    | { alias_slug: string; created: boolean; conflict_with: string | null }
+    | undefined;
+  if (!row) return null;
+  return { aliasSlug: row.alias_slug, created: row.created, conflictWith: row.conflict_with };
 }
 
 /** Busca um bairro por id. Usado para derivar a cidade no cadastro. */

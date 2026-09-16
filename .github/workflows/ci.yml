@@ -98,3 +98,33 @@ jobs:
           WEB_PUBLIC_URL: http://localhost:3000
           COOKIE_DOMAIN: localhost
           COOKIE_SECURE: 'false'
+
+  # As imagens sao o artefato do deploy: se um Dockerfile apodrecer (pacote que
+  # saiu de dependencies, arquivo que deixou de ser copiado), o erro tem que
+  # aparecer aqui, e nao no EasyPanel as 23h.
+  images:
+    name: Imagens de producao
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Imagem da API
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile.api
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Imagem do Web
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile.web
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

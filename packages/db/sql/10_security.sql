@@ -128,6 +128,69 @@ CREATE POLICY import_items_tenant_all ON import_items
 
 
 -- ---------------------------------------------------------------------------
+-- RLS: conexoes  (FORCE)
+-- ---------------------------------------------------------------------------
+-- Primeira tabela do sistema cuja linha pertence a DOIS tenants: quem pediu e
+-- o dono do imovel. As policies comparam as duas pontas, e nao um tenant_id
+-- unico. Um terceiro parceiro nao ve a linha nem sabe que ela existe.
+ALTER TABLE connection_requests ENABLE ROW LEVEL SECURITY;
+ALTER TABLE connection_requests FORCE  ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS connection_requests_party_select ON connection_requests;
+CREATE POLICY connection_requests_party_select ON connection_requests
+  FOR SELECT
+  USING (requester_tenant_id = app_current_tenant() OR owner_tenant_id = app_current_tenant());
+
+-- So quem pede cria, e so carimbado com o proprio tenant. Pedir conexao no
+-- proprio imovel nao faz sentido e fica barrado aqui, nao so no service.
+DROP POLICY IF EXISTS connection_requests_requester_insert ON connection_requests;
+CREATE POLICY connection_requests_requester_insert ON connection_requests
+  FOR INSERT
+  WITH CHECK (
+    requester_tenant_id = app_current_tenant()
+    AND owner_tenant_id <> app_current_tenant()
+  );
+
+-- As duas pontas atualizam a propria linha (o dono decide, quem pediu cancela).
+-- QUAL transicao cada lado pode fazer e regra de negocio, no service: o banco
+-- garante que ninguem de fora toca a linha.
+DROP POLICY IF EXISTS connection_requests_party_update ON connection_requests;
+CREATE POLICY connection_requests_party_update ON connection_requests
+  FOR UPDATE
+  USING (requester_tenant_id = app_current_tenant() OR owner_tenant_id = app_current_tenant())
+  WITH CHECK (requester_tenant_id = app_current_tenant() OR owner_tenant_id = app_current_tenant());
+-- Sem policy de DELETE: conexao nao se apaga, muda de status.
+
+ALTER TABLE connection_events ENABLE ROW LEVEL SECURITY;
+ALTER TABLE connection_events FORCE  ROW LEVEL SECURITY;
+
+-- A visibilidade do evento segue a da solicitacao: o EXISTS abaixo passa pela
+-- policy de connection_requests, entao quem nao ve a conexao nao ve a trilha.
+DROP POLICY IF EXISTS connection_events_party_select ON connection_events;
+CREATE POLICY connection_events_party_select ON connection_events
+  FOR SELECT
+  USING (
+    EXISTS (
+      SELECT 1 FROM connection_requests r
+       WHERE r.id = connection_events.connection_request_id
+    )
+  );
+
+DROP POLICY IF EXISTS connection_events_party_insert ON connection_events;
+CREATE POLICY connection_events_party_insert ON connection_events
+  FOR INSERT
+  WITH CHECK (
+    -- Ator nulo e a expiracao automatica: ninguem decidiu, o prazo acabou.
+    (actor_tenant_id = app_current_tenant() OR actor_tenant_id IS NULL)
+    AND EXISTS (
+      SELECT 1 FROM connection_requests r
+       WHERE r.id = connection_events.connection_request_id
+    )
+  );
+-- Append-only: sem UPDATE e sem DELETE, como audit_log.
+
+
+-- ---------------------------------------------------------------------------
 -- RLS: audit_log  (append-only)
 -- ---------------------------------------------------------------------------
 -- Nao existe policy de UPDATE nem de DELETE, e os privilegios sao revogados
@@ -388,6 +451,187 @@ $$;
 
 
 -- ===========================================================================
+-- Conexao: resolucao do dono e revelacao controlada
+--
+-- Estas funcoes existem porque o RLS, sozinho, nao resolve o fluxo:
+--  - quem PEDE conexao nao pode descobrir o dono (network_listings nao tem
+--    tenant_id, de proposito);
+--  - depois de aprovado, quem pediu precisa ver dados de OUTRO tenant.
+--
+-- Em vez de afrouxar as policies, a travessia fica em funcoes de superficie
+-- minima, com a regra de revelacao dentro do proprio WHERE.
+-- ===========================================================================
+
+DROP FUNCTION IF EXISTS connection_disclosure(uuid);
+DROP FUNCTION IF EXISTS connection_requester(uuid);
+DROP FUNCTION IF EXISTS connection_listing(uuid);
+
+-- Dono de um anuncio visivel na rede.
+--
+-- O valor devolvido NUNCA chega ao cliente: ele so carimba owner_tenant_id na
+-- linha da solicitacao, para as policies das duas pontas funcionarem depois.
+CREATE OR REPLACE FUNCTION network_listing_owner(p_listing_id uuid)
+RETURNS uuid
+  LANGUAGE sql
+  STABLE
+  SECURITY DEFINER
+  SET search_path = public, pg_temp
+AS $$
+  SELECT p.tenant_id
+  FROM properties p
+  WHERE p.id = p_listing_id
+    AND p.deleted_at IS NULL
+    AND p.status = 'active'
+    AND p.published_to_network;
+$$;
+
+-- O que o DONO revela a quem pediu.
+--
+-- As tres condicoes do WHERE sao a regra do produto, escrita no banco: a
+-- conexao precisa estar APROVADA, e quem pergunta precisa ser o SOLICITANTE
+-- daquela conexao. Uma consulta de qualquer outro lugar devolve zero linhas.
+--
+-- Nao devolve endereco: aprovar conexao nao e abrir o cadastro do imovel.
+CREATE FUNCTION connection_disclosure(p_request_id uuid)
+RETURNS TABLE (partner_name text, broker_name text, broker_phone text, broker_email text)
+  LANGUAGE sql
+  STABLE
+  SECURITY DEFINER
+  SET search_path = public, pg_temp
+AS $$
+  SELECT t.display_name, u.name, u.phone, u.email::text
+  FROM connection_requests r
+  JOIN tenants t     ON t.id = r.owner_tenant_id
+  JOIN properties p  ON p.id = r.property_id
+  LEFT JOIN users u  ON u.id = coalesce(r.decided_by_user_id, p.created_by)
+  WHERE r.id = p_request_id
+    AND r.status = 'approved'
+    AND r.requester_tenant_id = app_current_tenant();
+$$;
+
+-- Quem esta pedindo, para o DONO decidir.
+--
+-- Disponivel desde a solicitacao, e nao apos aceite: pedir conexao e se
+-- identificar. A assimetria e deliberada (ver schema/connections.ts).
+CREATE FUNCTION connection_requester(p_request_id uuid)
+RETURNS TABLE (partner_name text, broker_name text, broker_phone text, broker_email text)
+  LANGUAGE sql
+  STABLE
+  SECURITY DEFINER
+  SET search_path = public, pg_temp
+AS $$
+  SELECT t.display_name, u.name, u.phone, u.email::text
+  FROM connection_requests r
+  JOIN tenants t ON t.id = r.requester_tenant_id
+  JOIN users u   ON u.id = r.requester_user_id
+  WHERE r.id = p_request_id
+    AND r.owner_tenant_id = app_current_tenant();
+$$;
+
+-- O imovel da conexao, com os MESMOS campos que a rede ja mostra.
+--
+-- Serve as duas pontas e continua sem titulo, descricao, codigo interno e
+-- endereco -- um pedido de conexao nao amplia o que a busca revela.
+CREATE FUNCTION connection_listing(p_request_id uuid)
+RETURNS TABLE (
+  listing_id        uuid,
+  type              property_type,
+  purpose           property_purpose,
+  neighborhood_name text,
+  city_name         text,
+  city_uf           char(2),
+  bedrooms          smallint,
+  suites            smallint,
+  bathrooms         smallint,
+  parking_spots     smallint,
+  area_built        numeric,
+  area_total        numeric,
+  sale_price_cents  bigint,
+  rent_price_cents  bigint
+)
+  LANGUAGE sql
+  STABLE
+  SECURITY DEFINER
+  SET search_path = public, pg_temp
+AS $$
+  SELECT p.id, p.type, p.purpose, n.name, c.name, c.uf,
+         p.bedrooms, p.suites, p.bathrooms, p.parking_spots,
+         p.area_built, p.area_total, p.sale_price_cents, p.rent_price_cents
+  FROM connection_requests r
+  JOIN properties p     ON p.id = r.property_id
+  JOIN neighborhoods n  ON n.id = p.neighborhood_id
+  JOIN cities c         ON c.id = p.city_id
+  WHERE r.id = p_request_id
+    AND (r.requester_tenant_id = app_current_tenant() OR r.owner_tenant_id = app_current_tenant());
+$$;
+
+
+-- ---------------------------------------------------------------------------
+-- Curadoria de alias de bairro
+-- ---------------------------------------------------------------------------
+-- O catalogo e vocabulario COMPARTILHADO: app_user nao escreve nele (ver os
+-- REVOKE abaixo). Mas a importacao XML produz bairros nao reconhecidos, e
+-- obrigar o parceiro a esperar uma planilha do admin trava a carteira dele.
+--
+-- Meio-termo: uma funcao de superficie minima, que so acrescenta grafia
+-- alternativa para um bairro que JA existe. Ela nao cria bairro, nao renomeia
+-- e nao sequestra alias de outro bairro -- conflito volta descrito, para a
+-- aplicacao explicar, em vez de um UPDATE silencioso que tiraria imoveis do
+-- resultado de busca alheio.
+--
+-- O slug chega pronto: a normalizacao vive em packages/db/src/slug.ts e
+-- reescreve-la em SQL criaria duas implementacoes divergindo em silencio.
+DROP FUNCTION IF EXISTS catalog_add_alias(uuid, text);
+CREATE FUNCTION catalog_add_alias(p_neighborhood_id uuid, p_alias_slug text)
+RETURNS TABLE (alias_slug text, created boolean, conflict_with text)
+  LANGUAGE plpgsql
+  SECURITY DEFINER
+  SET search_path = public, pg_temp
+AS $$
+DECLARE
+  v_city      uuid;
+  v_tenant    uuid := app_current_tenant();
+  v_source    text;
+  v_existing  uuid;
+BEGIN
+  IF v_tenant IS NULL THEN
+    RETURN;  -- sem tenant no contexto, nada acontece (fail-closed)
+  END IF;
+  IF p_alias_slug !~ '^[a-z0-9]+(-[a-z0-9]+)*$' THEN
+    RETURN;
+  END IF;
+
+  SELECT n.city_id INTO v_city FROM neighborhoods n WHERE n.id = p_neighborhood_id;
+  IF v_city IS NULL THEN
+    RETURN;  -- bairro inexistente: a aplicacao responde 404
+  END IF;
+
+  SELECT a.neighborhood_id INTO v_existing
+    FROM neighborhood_aliases a
+   WHERE a.city_id = v_city AND a.alias_slug = p_alias_slug;
+
+  IF v_existing = p_neighborhood_id THEN
+    -- Idempotente: pedir de novo o mesmo alias nao e erro.
+    RETURN QUERY SELECT p_alias_slug, false, NULL::text;
+    RETURN;
+  END IF;
+
+  IF v_existing IS NOT NULL THEN
+    RETURN QUERY SELECT p_alias_slug, false, (SELECT n.name FROM neighborhoods n WHERE n.id = v_existing);
+    RETURN;
+  END IF;
+
+  SELECT 'partner:' || t.slug INTO v_source FROM tenants t WHERE t.id = v_tenant;
+
+  INSERT INTO neighborhood_aliases (city_id, neighborhood_id, alias_slug, source)
+  VALUES (v_city, p_neighborhood_id, p_alias_slug, coalesce(v_source, 'partner'));
+
+  RETURN QUERY SELECT p_alias_slug, true, NULL::text;
+END;
+$$;
+
+
+-- ===========================================================================
 -- Privilegios
 -- ===========================================================================
 
@@ -396,6 +640,12 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON properties, property_media TO app_user;
 GRANT SELECT, INSERT, UPDATE, DELETE ON users                      TO app_user;
 GRANT SELECT, UPDATE                 ON tenants                    TO app_user;
 GRANT SELECT, INSERT, UPDATE, DELETE ON import_sources, import_jobs, import_items TO app_user;
+
+-- Conexoes: cria, le e atualiza. Nunca apaga.
+GRANT SELECT, INSERT, UPDATE ON connection_requests TO app_user;
+REVOKE DELETE, TRUNCATE ON connection_requests FROM app_user;
+GRANT SELECT, INSERT ON connection_events TO app_user;
+REVOKE UPDATE, DELETE, TRUNCATE ON connection_events FROM app_user;
 
 -- Auditoria: so escreve e le. Nunca altera nem apaga.
 GRANT SELECT, INSERT ON audit_log TO app_user;
@@ -432,7 +682,12 @@ BEGIN
     'auth_consume_refresh_token(text)',
     'auth_revoke_refresh_token(text)',
     'auth_revoke_all_sessions(uuid)',
-    'network_media_storage_key(uuid)'
+    'network_media_storage_key(uuid)',
+    'network_listing_owner(uuid)',
+    'connection_disclosure(uuid)',
+    'connection_requester(uuid)',
+    'connection_listing(uuid)',
+    'catalog_add_alias(uuid,text)'
   ]
   LOOP
     EXECUTE format('REVOKE ALL ON FUNCTION %s FROM PUBLIC', fn);
@@ -440,6 +695,13 @@ BEGIN
   END LOOP;
 END
 $$;
+
+-- As funcoes de conexao sao SECURITY DEFINER e rodam como app_network_reader,
+-- mas decidem o que revelar comparando com app_current_tenant(). Sem este
+-- GRANT, o dono delas nao consegue chamar a funcao que le o tenant da sessao,
+-- e a leitura da conexao morre com "permission denied for function
+-- app_current_tenant" -- erro que so aparece em runtime, dentro da funcao.
+GRANT EXECUTE ON FUNCTION app_current_tenant() TO app_network_reader;
 
 -- As funcoes de auth precisam rodar com bypass: dono = app_network_reader.
 ALTER FUNCTION auth_find_user_by_email(citext)                              OWNER TO app_network_reader;
@@ -450,5 +712,14 @@ ALTER FUNCTION auth_consume_refresh_token(text)                             OWNE
 ALTER FUNCTION auth_revoke_refresh_token(text)                              OWNER TO app_network_reader;
 ALTER FUNCTION auth_revoke_all_sessions(uuid)                               OWNER TO app_network_reader;
 ALTER FUNCTION network_media_storage_key(uuid)                              OWNER TO app_network_reader;
+ALTER FUNCTION network_listing_owner(uuid)                                  OWNER TO app_network_reader;
+ALTER FUNCTION connection_disclosure(uuid)                                  OWNER TO app_network_reader;
+ALTER FUNCTION connection_requester(uuid)                                   OWNER TO app_network_reader;
+ALTER FUNCTION connection_listing(uuid)                                     OWNER TO app_network_reader;
+ALTER FUNCTION catalog_add_alias(uuid,text)                                 OWNER TO app_network_reader;
 GRANT SELECT, INSERT, UPDATE ON users, refresh_tokens TO app_network_reader;
 GRANT SELECT ON tenants TO app_network_reader;
+-- As funcoes de conexao leem as duas pontas com os direitos do dono.
+GRANT SELECT ON connection_requests, properties, neighborhoods, cities TO app_network_reader;
+-- catalog_add_alias() escreve APENAS aqui, e so acrescentando grafia.
+GRANT SELECT, INSERT ON neighborhood_aliases TO app_network_reader;

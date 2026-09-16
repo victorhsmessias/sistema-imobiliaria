@@ -9,6 +9,7 @@ import { env } from './env.js';
 import { AppError } from './lib/errors.js';
 import { authRoutes } from './modules/auth/routes.js';
 import { catalogRoutes } from './modules/catalog/routes.js';
+import { connectionRoutes } from './modules/connections/routes.js';
 import { importRoutes } from './modules/imports/routes.js';
 import { mediaRoutes } from './modules/media/routes.js';
 import { propertyRoutes } from './modules/properties/routes.js';
@@ -157,6 +158,7 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
   await app.register(mediaRoutes);
   await app.register(searchRoutes);
   await app.register(importRoutes);
+  await app.register(connectionRoutes);
 
   return app;
 }

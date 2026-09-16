@@ -2,9 +2,29 @@
 
 Rede fechada B2B entre corretores e imobiliárias parceiras. Cada parceiro sobe a própria
 carteira e busca na carteira agregada de todos os outros — **sem nunca descobrir de quem é
-o imóvel** até que uma conexão seja aprovada pela plataforma.
+o imóvel** até que o dono aprove a conexão.
 
 Plano de desenvolvimento completo (fases, modelagem, tarefas): `docs/plano.md`.
+Como colocar no ar (EasyPanel, variáveis, migrations, verificação): `docs/deploy.md`.
+
+Para quem vai mexer no código sem ter acompanhado as decisões:
+**`docs/backend.md`** (API, banco, RLS, importação, conexões) e
+**`docs/frontend.md`** (telas, contrato de dados, estilo, armadilhas).
+
+## Estado atual (16/09/2026)
+
+Funciona de ponta a ponta em ambiente local; falta colocar no ar.
+
+- **Pronto:** carteira com fotos, importação VrSync (arquivo ou URL, com simulação e curadoria
+  de bairros), busca anônima por bairro, e o fluxo de conexão — o dono aprova, e só então o
+  contato dele aparece.
+- **Verificado:** 201 testes (31 no banco, 170 na API), typecheck limpo, imagens de produção
+  construindo e subindo. **As telas nunca foram abertas num navegador.**
+- **Falta para o uso diário:** executar o deploy, fila para a importação (hoje ela roda dentro
+  do processo da API, que fica limitada a uma réplica) e notificação por e-mail das conexões.
+- **Falta antes de dado real:** mapa LGPD, backup com restore testado e sanitização da descrição.
+
+O quadro completo, com o que destrava cada item, está em `docs/plano.md` (seção "Onde estamos").
 
 ## A regra que define a arquitetura
 
@@ -47,7 +67,7 @@ pnpm install
 pnpm dev:infra      # Postgres (5434) + MinIO (9000/9001)
 pnpm db:migrate     # migrations + RLS + views + funções
 pnpm db:seed        # 3 parceiros, 60 imóveis, bairros de Londrina
-pnpm test           # 176 testes: isolamento, anonimização, auth, carteira, busca, mídia e importação
+pnpm test           # 201 testes: isolamento, anonimização, auth, carteira, busca, mídia, importação, conexões e curadoria
 
 pnpm dev:api        # API em http://localhost:3333
 pnpm dev:web        # Telas em http://localhost:3100
@@ -74,6 +94,7 @@ curl -b /tmp/jar 'http://localhost:3333/network/search?purpose=sale&types=aparta
 | POST | `/auth/login` `/auth/refresh` `/auth/logout` | Sessão em cookie httpOnly; refresh de uso único |
 | GET | `/auth/me` | Usuário da sessão |
 | GET | `/catalog/cities` · `/catalog/cities/:id/neighborhoods?q=` | Catálogo geográfico (bairro é a única localização) |
+| POST | `/catalog/neighborhoods/:id/aliases` | Curadoria: liga uma grafia do feed a um bairro (só `partner_admin`) |
 | GET | `/catalog/cities/:id/neighborhoods/resolve?name=Jd.+Higienopolis` | Resolve grafia livre para o bairro do catálogo |
 | GET POST PATCH DELETE | `/properties` · `/properties/:id` | Carteira do próprio parceiro |
 | POST GET PATCH DELETE | `/properties/:id/media` · `/media/:mediaId` · `/media/order` | Fotos: upload, ordem, exclusão |
@@ -82,6 +103,9 @@ curl -b /tmp/jar 'http://localhost:3333/network/search?purpose=sale&types=aparta
 | POST GET | `/imports/sources` | Feeds VrSync do parceiro (só `partner_admin`) |
 | POST | `/imports/sources/:id/jobs?dryRun=` · `/imports/sources/:id/upload?dryRun=` | Importa pela URL do feed ou pelo XML no corpo; dry-run é o padrão |
 | GET | `/imports/jobs/:id` · `/imports/jobs/:id/items?status=` | Resultado e diff por anúncio |
+| POST GET | `/connections` · `/connections?role=received\|sent` | Pedir conexão e ver a caixa de cada lado |
+| GET | `/connections/:id` | A conexão e a trilha dela |
+| POST | `/connections/:id/approve` · `/reject` · `/cancel` | O dono decide; quem pediu cancela |
 
 `/network/search` é a única rota em que um parceiro vê dado de outro. Ela lê apenas das
 views `network_*`, nunca da tabela `properties`.
@@ -145,8 +169,8 @@ apps/web            Next.js: login, busca, carteira    [pronto]
 apps/api            Fastify: auth, carteira, busca     [pronto]
 packages/db         schema Drizzle, RLS, views, seed   [pronto]
 packages/contracts  DTOs Zod compartilhados            [pronto]
-docker/         compose de desenvolvimento
-docs/           plano, mapa LGPD, notas de anonimização
+docker/         compose de desenvolvimento e Dockerfiles de produção
+docs/           plano, deploy, notas de anonimização
 ```
 
 ## Comandos
@@ -162,10 +186,25 @@ docs/           plano, mapa LGPD, notas de anonimização
 | `pnpm dev:api` | Sobe a API em modo watch |
 | `pnpm dev:web` | Sobe as telas em modo watch (porta 3100) |
 | `pnpm test` | Todas as suítes |
-| `pnpm test:rls` | Isolamento, anonimização e RLS da importação no banco (26 testes) |
-| `pnpm test:api` | Auth, carteira, busca, mídia, importação, parser VrSync e SSRF (150 testes) |
+| `pnpm test:rls` | Isolamento, anonimização e RLS de importação e conexões (31 testes) |
+| `pnpm test:api` | Auth, carteira, busca, mídia, importação, parser, SSRF, conexões e curadoria (170 testes) |
 | `pnpm catalog:export` | Exporta o catálogo de bairros para CSV (revisão em planilha) |
 | `pnpm catalog:import` | Aplica o CSV revisado (dry-run; `--apply` grava) |
+
+## Conexões
+
+A busca é anônima; a conexão é o caminho para negociar. **O dono do imóvel aprova cada pedido**
+— a plataforma não aprova conexão a conexão.
+
+- Quem pede aparece para o dono já no pedido: pedir é se identificar.
+- O dono só aparece para quem pediu **depois do aceite**, e mesmo assim sem endereço, título,
+  descrição nem código interno.
+- A regra de revelação está no banco, em `connection_disclosure()`: a função só devolve linha se
+  a conexão estiver aprovada e se quem pergunta for o solicitante.
+- `network_listing_owner()` existe porque quem pede não pode descobrir o dono — a view de busca
+  não tem `tenant_id`. O valor só carimba a linha do pedido e nunca chega ao cliente.
+- Pedido pendente expira em 7 dias. Cada transição vira evento, incluindo a primeira abertura dos
+  dados revelados; o evento diz de que lado veio o ato, nunca quem é.
 
 ## Importação VrSync
 
@@ -177,6 +216,10 @@ outubro de 2024, é recusado com mensagem orientando a exportar em VrSync.
 - Todo download passa por `lib/safe-fetch.ts` (proteção contra SSRF): o feed é escrito pelo
   parceiro, então a URL é entrada não confiável.
 - Bairro: nome → alias → CEP (ViaCEP) → **curadoria**. Nunca cria bairro sozinho.
+- A tela `/importacao` (só `partner_admin`) cadastra o feed, simula, mostra o diff por anúncio e
+  resolve os bairros não reconhecidos. Simular é o padrão; gravar exige um segundo clique.
+- A curadoria passa por `catalog_add_alias()`: `app_user` não escreve no catálogo, e a função só
+  acrescenta grafia a um bairro existente — não cria bairro nem toma o alias de outro.
 - `<Zone>` é guardado só no payload bruto do item (`import_items.raw_payload`), para a
   curadoria de bairros homônimos. Não vira coluna, filtro nem tela.
 - Tipo: tabela `property_type_mappings`; sem tradução, `outro` com aviso.

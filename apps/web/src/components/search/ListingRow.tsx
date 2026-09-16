@@ -1,16 +1,19 @@
 'use client';
 
 import type { NetworkListing } from '@imob/contracts';
+import Link from 'next/link';
 import { useState } from 'react';
 import { Icon } from '@/components/Icon';
 import { formatArea, formatMoney, formatPrice } from '@/lib/format';
-import { PURPOSE_LABELS, TYPE_LABELS, plural } from '@/lib/labels';
+import { CONNECTION_LABELS, PURPOSE_LABELS, TYPE_LABELS, plural } from '@/lib/labels';
 import styles from './search.module.css';
 
 interface Props {
   listing: NetworkListing;
   /** Finalidade buscada: decide qual valor fica em destaque num anuncio de venda e aluguel. */
   pricePurpose?: 'sale' | 'rent';
+  onRequestConnection?: (listingId: string) => void;
+  requesting?: boolean;
 }
 
 interface Spec {
@@ -25,7 +28,7 @@ interface Spec {
  * imobiliaria, contato, titulo, descricao nem endereco -- e nao ha como
  * mostrar, porque a API nao entrega. O bairro e o endereco possivel.
  */
-export function ListingRow({ listing, pricePurpose }: Props) {
+export function ListingRow({ listing, pricePurpose, onRequestConnection, requesting }: Props) {
   const [photoFailed, setPhotoFailed] = useState(false);
 
   // Numero em cima, unidade embaixo: o corretor compara coluna com coluna
@@ -88,6 +91,47 @@ export function ListingRow({ listing, pricePurpose }: Props) {
               </li>
             ))}
           </ul>
+        )}
+
+        {/* A conexão é o caminho para negociar: sem ela, o anúncio é anônimo. */}
+        {!listing.isOwn && (
+          <div className={styles.connection}>
+            {listing.connection === null && (
+              <button
+                type="button"
+                className="btn btn-primary btn-sm"
+                disabled={requesting}
+                onClick={() => onRequestConnection?.(listing.listingId)}
+              >
+                {requesting ? 'Enviando…' : 'Pedir conexão'}
+              </button>
+            )}
+            {listing.connection?.status === 'pending' && (
+              <span className="badge badge-warn">{CONNECTION_LABELS.pending}</span>
+            )}
+            {listing.connection?.status === 'approved' && (
+              <Link href="/conexoes" className="btn btn-sm">
+                Ver contato
+              </Link>
+            )}
+            {listing.connection !== null &&
+              listing.connection.status !== 'pending' &&
+              listing.connection.status !== 'approved' && (
+                <>
+                  <span className="badge badge-outline">
+                    {CONNECTION_LABELS[listing.connection.status]}
+                  </span>
+                  <button
+                    type="button"
+                    className="btn btn-sm"
+                    disabled={requesting}
+                    onClick={() => onRequestConnection?.(listing.listingId)}
+                  >
+                    Pedir de novo
+                  </button>
+                </>
+              )}
+          </div>
         )}
 
         <div className={styles.meta}>

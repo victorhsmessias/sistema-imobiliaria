@@ -81,3 +81,17 @@ export const OWNER_IDENTIFYING_FIELDS_OTHER: Record<string, string> = {
   feed_url: 'URL do feed XML: o dominio e o da imobiliaria.',
   raw_payload: 'O <Listing> original: ContactInfo, endereco e URLs das fotos.',
 };
+
+/**
+ * O que uma conexao APROVADA pode revelar do dono, por nivel de disclosure.
+ *
+ * Esta lista e o contrato da revelacao: a suite confere que a resposta da
+ * conexao nao traz campo fora dela. Endereco exato (street, street_number,
+ * zip, latitude, longitude) nao aparece em nenhum nivel -- aprovar uma conexao
+ * nao e abrir o cadastro do imovel, e com o endereco o solicitante acha o
+ * anuncio original num portal publico e fecha por fora.
+ */
+export const DISCLOSURE_FIELDS: Record<'partner' | 'partner_contact', readonly string[]> = {
+  partner: ['partnerName'],
+  partner_contact: ['partnerName', 'brokerName', 'brokerPhone', 'brokerEmail'],
+};

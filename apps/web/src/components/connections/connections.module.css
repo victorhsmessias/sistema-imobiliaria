@@ -1,0 +1,154 @@
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  max-width: 880px;
+}
+
+.head {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 16px 18px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-m);
+}
+
+.cardHead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.place {
+  font-size: 16.5px;
+  font-weight: 650;
+  font-variation-settings: var(--semi-wide);
+  letter-spacing: -0.01em;
+}
+
+.city {
+  margin-left: 8px;
+  font-size: 12.5px;
+  color: var(--ink-3);
+}
+
+.specs {
+  margin: 0;
+  font-size: 13.5px;
+  color: var(--ink-2);
+}
+
+.message {
+  margin: 0;
+  padding: 8px 12px;
+  background: var(--surface-2);
+  border-radius: var(--radius-s);
+  font-size: 13.5px;
+  color: var(--ink-2);
+}
+
+/* Dados de uma das partes. */
+.party {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 24px;
+  margin: 4px 0 0;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-s);
+}
+
+/* O que só apareceu depois do aceite merece destaque: é o ponto do produto. */
+.revealed {
+  border-color: var(--ok);
+  background: var(--ok-soft);
+}
+
+.party div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.party dt {
+  font-size: 11.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--ink-3);
+}
+
+.party dd {
+  margin: 0;
+  font-size: 13.5px;
+  font-weight: 500;
+}
+
+.foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 4px;
+}
+
+.actions {
+  display: flex;
+  gap: 8px;
+}
+
+.rejectBox {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+
+.rejectBox label {
+  font-size: 12.5px;
+  color: var(--ink-2);
+}
+
+.rejectBox textarea {
+  min-height: 64px;
+  resize: vertical;
+}
+
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 48px 32px;
+  text-align: center;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-m);
+}
+
+@media (max-width: 560px) {
+  .cardHead {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+  }
+}

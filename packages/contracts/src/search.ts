@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { connectionStatus } from './connections.js';
 import { propertyPurpose, propertyType } from './property.js';
 
 /**
@@ -140,6 +141,16 @@ export const networkListing = z.object({
    * sao dele tambem nao diz de quem sao.
    */
   isOwn: z.boolean(),
+
+  /**
+   * Situacao do pedido de conexao DESTE parceiro com este anuncio.
+   *
+   * Null quando nunca pediu. Não diz nada sobre o dono: é o próprio histórico
+   * de quem está buscando.
+   */
+  connection: z
+    .object({ id: z.string().uuid(), status: connectionStatus })
+    .nullable(),
 
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),

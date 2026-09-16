@@ -1,4 +1,9 @@
-import type { PropertyPurpose, PropertyStatus, PropertyType } from '@imob/contracts';
+import type {
+  ConnectionStatus,
+  PropertyPurpose,
+  PropertyStatus,
+  PropertyType,
+} from '@imob/contracts';
 
 export const TYPE_LABELS: Record<PropertyType, string> = {
   apartamento: 'Apartamento',
@@ -45,6 +50,25 @@ export const STATUS_BADGE: Record<PropertyStatus, string> = {
   reserved: 'badge badge-warn',
   sold_rented: 'badge badge-info',
   archived: 'badge badge-outline',
+};
+
+export const CONNECTION_LABELS: Record<ConnectionStatus, string> = {
+  pending: 'Aguardando resposta',
+  approved: 'Aprovada',
+  rejected: 'Recusada',
+  cancelled: 'Cancelada',
+  expired: 'Expirada',
+  revoked: 'Revogada',
+};
+
+/** Verde só para a conexão que de fato abriu o contato. */
+export const CONNECTION_BADGE: Record<ConnectionStatus, string> = {
+  pending: 'badge badge-warn',
+  approved: 'badge badge-ok',
+  rejected: 'badge badge-outline',
+  cancelled: 'badge badge-outline',
+  expired: 'badge badge-outline',
+  revoked: 'badge badge-outline',
 };
 
 export function plural(count: number, one: string, many: string): string {

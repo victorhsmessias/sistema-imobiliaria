@@ -1,5 +1,6 @@
-import type { NetworkListing, SearchFilters, SearchResult } from '@imob/contracts';
+import type { ConnectionStatus, NetworkListing, SearchFilters, SearchResult } from '@imob/contracts';
 import { inArray, isNull, and, properties, withTenant } from '@imob/db';
+import * as connectionsRepo from '../connections/repository.js';
 import * as repo from './repository.js';
 
 const num = (value: string | number | null): number | null =>
@@ -12,20 +13,39 @@ const num = (value: string | number | null): number | null =>
  * pertencem a ele. Nao ha vazamento: o parceiro ja sabe o que e dele, e saber
  * que os outros NAO sao dele nao diz de quem sao.
  */
-async function ownIdsAmong(tenantId: string, listingIds: string[]): Promise<Set<string>> {
-  if (listingIds.length === 0) return new Set();
-
-  const rows = await withTenant(tenantId, (tx) =>
-    tx
-      .select({ id: properties.id })
-      .from(properties)
-      .where(and(inArray(properties.id, listingIds), isNull(properties.deletedAt))),
-  );
-
-  return new Set(rows.map((r) => r.id));
+interface OwnContext {
+  own: Set<string>;
+  connections: Map<string, { id: string; status: ConnectionStatus }>;
 }
 
-function toListing(row: repo.NetworkRow, isOwn: boolean): NetworkListing {
+/**
+ * O que o parceiro que busca ja sabe sobre cada anuncio da pagina: quais sao
+ * dele e em quais ele ja pediu conexao.
+ *
+ * Nenhum dos dois revela o dono dos demais: o proprio parceiro e a fonte das
+ * duas informacoes.
+ */
+async function ownContext(tenantId: string, listingIds: string[]): Promise<OwnContext> {
+  if (listingIds.length === 0) return { own: new Set(), connections: new Map() };
+
+  return withTenant(tenantId, async (tx) => {
+    const [rows, connections] = await Promise.all([
+      tx
+        .select({ id: properties.id })
+        .from(properties)
+        .where(and(inArray(properties.id, listingIds), isNull(properties.deletedAt))),
+      connectionsRepo.statusByListing(tx, tenantId, listingIds),
+    ]);
+
+    return { own: new Set(rows.map((r) => r.id)), connections };
+  });
+}
+
+function toListing(
+  row: repo.NetworkRow,
+  isOwn: boolean,
+  connection: { id: string; status: ConnectionStatus } | null,
+): NetworkListing {
   return {
     listingId: row.listing_id,
     type: row.type as NetworkListing['type'],
@@ -47,6 +67,7 @@ function toListing(row: repo.NetworkRow, isOwn: boolean): NetworkListing {
     photoCount: Number(row.photo_count),
     coverMediaId: row.cover_media_id,
     isOwn,
+    connection,
     // Ja vem em ISO-8601 UTC, formatado pelo SQL (ver repository.ts).
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -59,7 +80,7 @@ export async function search(tenantId: string, filters: SearchFilters): Promise<
   const hasMore = rows.length > filters.limit;
   const page = hasMore ? rows.slice(0, filters.limit) : rows;
 
-  const own = await ownIdsAmong(
+  const context = await ownContext(
     tenantId,
     page.map((r) => r.listing_id),
   );
@@ -71,7 +92,9 @@ export async function search(tenantId: string, filters: SearchFilters): Promise<
       : null;
 
   return {
-    items: page.map((row) => toListing(row, own.has(row.listing_id))),
+    items: page.map((row) =>
+      toListing(row, context.own.has(row.listing_id), context.connections.get(row.listing_id) ?? null),
+    ),
     nextCursor,
   };
 }

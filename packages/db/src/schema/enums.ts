@@ -57,6 +57,46 @@ export const importJobStatusEnum = pgEnum('import_job_status', [
   'failed',
 ]);
 
+/**
+ * Ciclo de vida de uma solicitacao de conexao.
+ *
+ * `revoked` existe para a plataforma desfazer uma conexao aprovada (parceiro
+ * suspenso, abuso comprovado) sem apagar a trilha.
+ */
+export const connectionStatusEnum = pgEnum('connection_status', [
+  'pending',
+  'approved',
+  'rejected',
+  'cancelled',
+  'expired',
+  'revoked',
+]);
+
+/**
+ * O que o solicitante enxerga do dono depois do aceite.
+ *
+ * Por solicitacao, e nao global: a politica muda sem migration. Endereco exato
+ * NUNCA entra em nenhum dos niveis -- e o vetor que derruba a anonimizacao
+ * inteira (ver docs/anonimizacao.md).
+ */
+export const disclosureLevelEnum = pgEnum('disclosure_level', [
+  /** So a marca do parceiro. */
+  'partner',
+  /** Marca do parceiro + nome, telefone e e-mail do corretor. */
+  'partner_contact',
+]);
+
+export const connectionEventTypeEnum = pgEnum('connection_event_type', [
+  'requested',
+  'approved',
+  'rejected',
+  'cancelled',
+  'expired',
+  'revoked',
+  /** O solicitante abriu os dados revelados. */
+  'disclosed',
+]);
+
 export const importItemStatusEnum = pgEnum('import_item_status', [
   'created',
   'updated',

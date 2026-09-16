@@ -51,6 +51,17 @@ perfil de cor". O teste em `apps/api/test/media.test.ts` gera um JPEG com GPS, `
 armazenado e verifica que não sobrou metadado nem sequer as strings `Alfa`, `iPhone` ou
 `GPS` dentro dos bytes.
 
+## Resolvidos no fluxo de conexão (15/09/2026)
+
+| # | Vetor | Mitigação | Onde |
+|---|---|---|---|
+| 15 | Pedido pendente revelando o dono | A resposta de um pedido pendente não traz marca, contato nem endereço; a suíte serializa a resposta e procura todos os identificadores do dono | `connections.test.ts` |
+| 16 | Revelação decidida pela aplicação | `connection_disclosure()` só devolve linha se o status for `approved` **e** quem pergunta for o solicitante — a regra está no `WHERE`, no banco | `sql/10_security.sql` |
+| 17 | Endereço junto com a aprovação | Nenhum nível de disclosure inclui `street`, `zip`, coordenadas, título, descrição ou `reference_code`; `connection_listing()` devolve os mesmos campos da busca | idem |
+| 18 | Descobrir o dono para pedir conexão | Quem pede nunca lê `tenant_id`: `network_listing_owner()` resolve o dono e o valor só carimba a linha | idem |
+| 19 | Trilha revelando quem recusou | O evento diz de que lado veio o ato (`you`/`other`/`platform`), nunca o nome — recusar não pode identificar o dono | `connections/service.ts` |
+| 20 | Terceiro parceiro vendo a conexão alheia | A linha pertence às duas pontas e as policies comparam as duas; um terceiro recebe 404 | `rls.test.ts` |
+
 ## Abertos — decisão de produto, não técnica
 
 ### 1. Marca d'água queimada na foto — **ADIADO por decisão do cliente (12/09/2026)**

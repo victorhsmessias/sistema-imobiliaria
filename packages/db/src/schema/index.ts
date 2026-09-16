@@ -7,3 +7,4 @@ export * from './properties.js';
 export * from './media.js';
 export * from './audit.js';
 export * from './imports.js';
+export * from './connections.js';

@@ -5,6 +5,12 @@
 --   prod: executar manualmente com o superusuario do Postgres antes do
 --         primeiro deploy (psql -f 00_bootstrap_roles.sql)
 --
+-- ATENCAO EM PRODUCAO: as senhas abaixo sao de DESENVOLVIMENTO e estao no
+-- repositorio. Logo apos rodar este arquivo em producao, troque as duas com
+-- ALTER ROLE ... PASSWORD (o passo esta em docs/deploy.md). Enquanto nao
+-- trocar, qualquer pessoa que ja leu o repositorio conhece a credencial do
+-- banco -- e app_migrator ignora as policies de RLS ao escrever.
+--
 -- ---------------------------------------------------------------------------
 -- Tres roles, e o motivo de cada um:
 --

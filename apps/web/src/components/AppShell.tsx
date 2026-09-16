@@ -7,9 +7,12 @@ import { Icon } from './Icon';
 import { useSession } from './SessionProvider';
 import styles from './AppShell.module.css';
 
-const NAV = [
+const NAV: Array<{ href: string; label: string; adminOnly?: boolean }> = [
   { href: '/busca', label: 'Buscar na rede' },
+  { href: '/conexoes', label: 'Conexões' },
   { href: '/carteira', label: 'Minha carteira' },
+  // Importar reescreve a carteira inteira: é operação de administrador.
+  { href: '/importacao', label: 'Importação', adminOnly: true },
 ];
 
 function initials(name: string): string {
@@ -32,7 +35,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </Link>
 
         <nav className={styles.nav} aria-label="Principal">
-          {NAV.map((item) => {
+          {NAV.filter((item) => !item.adminOnly || user.role === 'partner_admin').map((item) => {
             const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
             return (
               <Link

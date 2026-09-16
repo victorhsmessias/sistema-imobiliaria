@@ -16,6 +16,53 @@ Isso faz da **anonimização cross-tenant o requisito central de arquitetura**, 
 | Importação em massa | **XML VrSync** como formato único (revisão de 14/09/2026) |
 | Valores | **Venda e aluguel em colunas separadas**; IPTU anual (revisão de 14/09/2026) |
 | Marca e login | Mensagem neutra, sem promessa de zona; identidade definitiva é item futuro |
+| Quem aprova a conexão | **O dono do imóvel**, pedido a pedido. A plataforma credencia, arbitra e pode suspender — não aprova cada conexão (revisão de 15/09/2026) |
+
+---
+
+## Onde estamos — 16/09/2026
+
+**O produto funciona de ponta a ponta em ambiente local. O que falta é colocá-lo no ar.**
+
+Um parceiro já consegue, hoje:
+
+1. Entrar na rede e cadastrar imóveis com fotos (sem EXIF, sob chave opaca).
+2. **Importar a carteira inteira** por XML VrSync — arquivo ou URL —, simulando antes,
+   vendo o diff anúncio a anúncio e resolvendo na tela os bairros que o catálogo não reconheceu.
+3. **Buscar na carteira agregada** por bairro, tipo, quartos, área e faixa de valor, sem
+   descobrir de quem é nenhum imóvel.
+4. **Pedir conexão** num imóvel de outro parceiro. O dono vê quem pediu e decide; só depois do
+   aceite o contato dele aparece — e o endereço, nunca.
+
+O que sustenta essa afirmação: **201 testes** (31 no banco, 170 na API), typecheck limpo nos
+quatro pacotes, e as imagens de produção construindo e subindo (API respondendo `/health`, web
+servindo `/login`). Detalhe por tarefa nas tabelas de status abaixo.
+
+### O que falta, e o que trava cada item
+
+| Falta | Impacto | O que destrava |
+|---|---|---|
+| **Executar o deploy** (F0 #12) | ninguém fora daqui usa | domínio, tipo de Postgres, storage e credencial do EasyPanel — artefatos e guia já prontos em `docs/deploy.md` |
+| **Fila (pg-boss)** (F1 #2) | importação ocupa o processo da API e se perde se o container reiniciar; prende a API em **uma réplica** | nada; é trabalho |
+| **E-mail das conexões** (F1 #5b) | o dono só descobre o pedido entrando na tela | definir remetente e provedor |
+| **Sanitização da descrição** (F1 #4) | título e descrição ficam fora da busca; o anúncio da rede mostra só dados estruturados | nada; é trabalho |
+| **Mapa LGPD** (F1 #8) | inclui o CEP enviado ao ViaCEP e a região do storage | decisão sobre onde o bucket fica |
+| **Backup com restore testado** (F1 #9) | risco alto no dia em que entrar dado real | nada; é trabalho |
+| **Marca d'água nas fotos** | vazamento visual nas fotos importadas | decisão do cliente (adiada, não resolvida) |
+| **Termo de parceria antes do contato** | mudaria o fluxo de conexão | decisão do cliente |
+| **Revogar conexão pela plataforma** | o status `revoked` existe, a rota não | definir como `platform_admin` age (hoje não tem tenant no contexto) |
+
+### O que nunca foi verificado
+
+**As telas não foram abertas num navegador.** A verificação foi por typecheck, testes e build;
+as imagens sobem e servem a página de login, mas busca, carteira, conexões e importação nunca
+passaram por um olho humano. É o tipo de defeito que teste não pega.
+
+### Ordem sugerida
+
+1. Deploy da demo (destrava a validação com corretor de verdade).
+2. Fila + e-mail das conexões (são o que falta para uso diário).
+3. LGPD, backup e sanitização de descrição, antes de qualquer dado real.
 
 ---
 
@@ -75,7 +122,7 @@ Isso faz da **anonimização cross-tenant o requisito central de arquitetura**, 
 
 ## Status de execução
 
-Atualizado em 14/09/2026. Verificado com migrate → seed → todas as suítes.
+Atualizado em 16/09/2026. Verificado com migrate → seed → todas as suítes, typecheck e build das imagens.
 
 ### Fase 0
 
@@ -93,7 +140,7 @@ Atualizado em 14/09/2026. Verificado com migrate → seed → todas as suítes.
 | 9 | Upload de mídia (sharp, WebP, EXIF strip, URL assinada) | **pronto** |
 | 10 | Busca com filtros sobre `network_listings` | **pronto** — bairro com autocomplete, sem zona |
 | 11 | Suíte de anonimização + gate de CI | **pronto** |
-| 12 | Deploy no EasyPanel | pendente |
+| 12 | Deploy no EasyPanel | **artefatos prontos** (16/09/2026): Dockerfiles, `.dockerignore`, build das imagens no CI e `docs/deploy.md`. Execução no servidor pendente |
 
 ### Fase 1 — adiantado nesta revisão
 
@@ -103,9 +150,11 @@ Atualizado em 14/09/2026. Verificado com migrate → seed → todas as suítes.
 | 3 | Download seguro (SSRF) e re-hospedagem das fotos do `<Media>` | **pronto** |
 | — | Tabelas `import_sources`/`import_jobs`/`import_items` com FORCE RLS; dry-run; relatório de diff por anúncio | **pronto** |
 | — | Rotas `/imports/*` (só `partner_admin`) | **pronto** — execução em processo, sem fila ainda |
+| 5 | **Fluxo de conexão**: pedir, aprovar, recusar, cancelar, expirar, revelação controlada + tela | **pronto** — falta notificação por e-mail |
+| 3b | **Tela de importação e curadoria**: cadastrar feed, simular, ver o diff, ligar grafia a bairro | **pronto** (16/09/2026) |
 
-**176 testes verdes**: 26 no banco (isolamento, anonimização, RLS das tabelas de importação) e
-150 na API (auth, carteira, busca, mídia, importação, parser VrSync e SSRF).
+**201 testes verdes**: 31 no banco (isolamento, anonimização, RLS da importação e das conexões) e
+170 na API (auth, carteira, busca, mídia, importação, parser VrSync, SSRF, conexões e curadoria).
 
 ### Decisões do cliente registradas (12/09/2026)
 
@@ -255,9 +304,15 @@ tradução → `outro` com aviso no relatório.
 - **`import_jobs`** — `source_id` · `status` (`queued|running|succeeded|failed`) · `dry_run` · `stats` jsonb · `error`
 - **`import_items`** — `job_id` · `external_id` ⚠️ · `property_id` · `status` (`created|updated|unchanged|archived|skipped|needs_curation|failed`) · `changes` (campo → de/para) · `warnings` · `errors` · `raw_payload` ⚠️ (o `<Listing>` original, **único lugar onde `<Zone>` é guardado**)
 
+### Conexões (FORCE RLS) — implementado em 15/09/2026
+- **`connection_requests`** — `property_id` · `requester_tenant_id` · `requester_user_id` · `owner_tenant_id` · `status` (`pending|approved|rejected|cancelled|expired|revoked`) · `disclosure_level` (`partner|partner_contact`) · `message` · `decision_note` · `decided_by_user_id` · `decided_at` · `expires_at` — unique parcial `(property_id, requester_tenant_id) WHERE status='pending'`
+- **`connection_events`** — `type` (`requested|approved|rejected|cancelled|expired|revoked|disclosed`) · `actor_tenant_id` (nulo = expiração automática) · `actor_user_id` · `metadata` — append-only
+
+> **A linha pertence a DOIS tenants.** É a primeira do sistema assim: as policies comparam as
+> duas pontas (`requester_tenant_id` ou `owner_tenant_id`), e não o `tenant_id` único das
+> outras tabelas. Um terceiro parceiro não vê a linha nem sabe que ela existe.
+
 ### Tabelas da Fase 1 ainda não criadas
-- **`connection_requests`** — `property_id` · `requester_tenant_id` · `owner_tenant_id` · `status` (`pending|approved|rejected|cancelled|expired`) · `decided_by_user_id` · `disclosure_level`
-- **`connection_events`** — trilha fina de cada transição
 - **`shared_links`** — `token_hash` · `property_id` · `expires_at` · `revoked_at` · `view_count`
 
 ---
@@ -326,11 +381,84 @@ Por anúncio:
 6. **Arquivamento**: o que a fonte trouxe antes e sumiu do feed é arquivado. Feed sem nenhum
    anúncio válido não arquiva nada (é mais provável exportação quebrada).
 
+### Tela e curadoria (16/09/2026)
+
+`/importacao`, visível só para `partner_admin`: cadastra o feed, envia o XML ou usa a URL,
+acompanha a execução, mostra os contadores e o diff campo a campo de cada anúncio. **Simular é
+o padrão**; gravar exige um segundo clique.
+
+Para os itens em `needs_curation`, a tela mostra o bairro **como veio no feed** (e a `<Zone>`,
+quando existe, só como pista), e o administrador escolhe o bairro do catálogo correspondente.
+Isso chama `POST /catalog/neighborhoods/:id/aliases`, que passa por `catalog_add_alias()`
+(`SECURITY DEFINER`): `app_user` continua sem escrita no catálogo, a função só **acrescenta
+grafia** a um bairro existente — não cria bairro, não renomeia e não toma o alias de outro
+bairro (conflito volta descrito, para a tela explicar). O alias fica com `source` =
+`partner:<slug>`, e a criação é auditada.
+
+O slug chega pronto do TypeScript: reescrever a normalização em SQL criaria duas
+implementações de `slugify` divergindo em silêncio.
+
 ---
+
+## Fluxo de conexão
+
+Decidido em 15/09/2026, a partir de pesquisa de mercado (resumo abaixo).
+
+**O dono do imóvel aprova cada pedido. A plataforma não aprova conexão a conexão** — ela
+credencia quem entra, arbitra e pode suspender. Rotas: `POST /connections`,
+`GET /connections?role=received|sent`, `GET /connections/:id`, e
+`POST /connections/:id/{approve,reject,cancel}`. Qualquer usuário do parceiro usa (não exige
+`partner_admin`: é ato comercial, não configuração de conta).
+
+**Quem vê o quê:**
+
+| Momento | O dono vê | Quem pediu vê |
+|---|---|---|
+| Pedido criado | marca, corretor, telefone e e-mail de quem pediu, mais o recado | nada do dono |
+| Recusado / expirado / cancelado | idem | nada do dono; só o motivo, se houver |
+| **Aprovado** | idem | marca do parceiro e, no nível `partner_contact`, contato do corretor |
+| Sempre | — | **nunca o endereço, o título, a descrição nem o código interno** |
+
+A assimetria é deliberada: pedir conexão é se identificar; aprovar é que revela o dono.
+
+**Onde a regra mora:** em funções `SECURITY DEFINER` (`connection_disclosure`,
+`connection_requester`, `connection_listing`, `network_listing_owner`), não no service. O
+`WHERE` de `connection_disclosure()` exige status `approved` **e** que quem pergunta seja o
+solicitante — uma consulta de qualquer outro lugar devolve zero linhas. `network_listing_owner()`
+existe porque quem pede não pode descobrir o dono: a view de busca não tem `tenant_id`, e o
+valor devolvido só carimba a linha, nunca chega ao cliente.
+
+**Prazo:** pedido pendente expira em 7 dias. A varredura roda na leitura (volume pequeno) e
+vira job quando a fila entrar; o evento de expiração fica sem ator, e a trilha mostra "plataforma".
+
+**Trilha:** cada transição vira evento, inclusive a primeira abertura dos dados revelados
+(`disclosed`). O evento diz **de que lado** veio o ato, nunca quem é — mostrar o nome de quem
+recusou revelaria o dono justamente no caso em que ele disse não.
+
+### Pesquisa que embasou a decisão (15/09/2026)
+
+- **Match mútuo tem precedente e é o padrão do nicho.** Os Termos do Homer descrevem "dupla
+  aceitação, que permite aos Usuários se comunicarem apenas se ambos tiverem interesse", e só
+  então exibem nome, CRECI, telefone e e-mail. ImóvelPro e Casafari Connect seguem a mesma ideia.
+- **Plataforma aprovando cada conexão não tem precedente imobiliário.** Onde existe
+  (ReferralExchange, HomeLight) não há dono do imóvel do outro lado. No Axial (M&A), a
+  plataforma aprova a **entrada** e o dono decide cada contraparte.
+- **A camada de plataforma existe em todas as redes**, em outro ponto: credenciamento (CRECI),
+  moderação e banimento — o Homer cancela conta por "ponte" — e garantia financeira.
+- **Anonimizar o corretor captador não tem precedente localizado**: o setor anonimiza o
+  proprietário e o endereço. O modelo mais próximo é o de M&A: teaser anônimo → NDA → identidade.
+- **Risco documentado:** "by-pass" (fechar por fora) é reconhecido no setor e vedado pelo Código
+  de Ética do COFECI, art. 6º. A barreira de adoção citada é "medo de ser passado para trás".
+
+Ressalvas: os termos do ImóvelPro estão fora do ar (404) e as regras de visibilidade pré-aceite
+do Casafari e do Top Agent Network não foram verificadas.
 
 ## Vetores de vazamento que exigem decisão de produto
 
-1. **Marca d'água queimada na foto** — adiado por decisão do cliente. Afeta também fotos importadas.
+1. **Marca d'água queimada na foto** — **pendência conhecida, adiada e não bloqueante** (reconfirmado
+   pelo cliente em 15/09/2026). Nenhuma solução (detecção, corte, IA) deve ser implementada até nova
+   decisão. Com a importação VrSync, passa a ser o principal vazamento residual: as fotos importadas
+   chegam com a marca da imobiliária.
 2. **Endereço exato** — cross-tenant expõe bairro e nada mais fino.
 3. **Descrição livre** — fora da view até o pipeline de redação (F1 #4).
 4. **URL da foto vinda do XML** — **resolvido**: re-hospedagem obrigatória em `syncMedia`.
@@ -346,7 +474,7 @@ Por anúncio:
 | # | Tarefa | Status |
 |---|---|---|
 | 1–11 | Ver status acima | **pronto** |
-| 12 | Deploy: Dockerfiles multi-stage, EasyPanel, migrations como step separado, healthcheck, TLS | pendente |
+| 12 | Deploy: Dockerfiles multi-stage, EasyPanel, migrations como step separado, healthcheck, TLS | **artefatos prontos**; falta executar no servidor (ver `docs/deploy.md`) |
 
 ## Tarefas — Fase 1 (v1 operacional), revisada em 14/09/2026
 
@@ -355,11 +483,12 @@ Por anúncio:
 | 1 | ~~Normalizador XML + adapters ZAP/Imovelweb/OLX/genérico~~ → **Parser VrSync** + tradução de tipo + bairro por alias/CEP | 3d | **pronto** |
 | 2 | Fila **pg-boss**: agendamento por fonte, retry, execução fora do processo da API (hoje roda em processo) | 1,5d | pendente |
 | 3 | Download seguro e **re-hospedagem das fotos do `<Media>`** | 1,5d | **pronto** |
-| 3b | **Tela de importação e curadoria**: cadastrar feed, rodar dry-run, ver diff, resolver `needs_curation` criando alias | 2d | pendente |
+| 3b | **Tela de importação e curadoria**: cadastrar feed, rodar dry-run, ver diff, resolver `needs_curation` criando alias | 2d | **pronto** |
 | 3c | Autocomplete de bairro no servidor (`pg_trgm`, cidade no rótulo) quando houver mais de uma cidade | 1d | pendente |
 | 4 | Pipeline de sanitização de descrição (telefone, e-mail, URL, marcas) + `description_sanitized` na view | 2d | pendente |
-| 5 | **Fluxo de conexão**: solicitar, aprovar/recusar, expiração, e-mail, revelação controlada — **o diferencial real frente ao mercado** | 3d | pendente, **prioridade** |
-| 6 | Auditoria completa das transições + tela de histórico | 1d | pendente |
+| 5 | **Fluxo de conexão**: pedir, aprovar, recusar, cancelar, expirar, revelação controlada, tela | 3d | **pronto** |
+| 5b | Notificação por e-mail (pedido recebido, decisão tomada, pedido perto de vencer) | 1d | pendente |
+| 6 | Auditoria completa das transições + tela de histórico por conexão | 1d | parcial — trilha pronta (`connection_events`), falta tela |
 | 7 | Compartilhamento: link com token + página anônima + PDF com metadata limpo | 3d | pendente |
 | 8 | LGPD: `docs/lgpd-data-map.md` (inclui CEP enviado ao ViaCEP), retenção, export/exclusão | 1,5d | pendente |
 | 9 | Backup `pg_dump` agendado → R2 **com teste de restore** | 1d | pendente |
@@ -387,8 +516,10 @@ Por anúncio:
 
 | Pendência | O que trava | Premissa para seguir |
 |---|---|---|
-| Quem aprova a conexão | F1 #5 | Dono do imóvel aprova; admin pode intervir. |
-| O que é liberado após aprovar | F1 #5 | `disclosure_level`: revela parceiro + contato do corretor, nunca endereço exato. |
+| ~~Quem aprova a conexão~~ | — | **Resolvido (15/09/2026)**: o dono aprova cada pedido; a plataforma credencia, arbitra e pode suspender. |
+| ~~O que é liberado após aprovar~~ | — | **Resolvido**: `disclosure_level` por pedido — marca do parceiro, ou marca + contato do corretor. Endereço nunca. |
+| **Termo de parceria antes de liberar o contato?** | Nada hoje | Em aberto. Tem precedente fora do imobiliário (M&A, ReferralExchange); no Brasil o termo vem depois do contato. Implementar exigiria uma coluna de aceite e uma etapa na tela. |
+| Revogação de conexão pela plataforma | Nada hoje | O status `revoked` já existe no schema; falta a rota de admin, que precisa de um caminho para `platform_admin` (hoje sem tenant no contexto). |
 | ~~XML traz fotos?~~ | — | **Resolvido**: VrSync traz em `<Media>`; re-hospedagem implementada. |
 | Aumentar os tipos da plataforma (cobertura, kitnet…) | Nada | Hoje mapeados para `apartamento`/`casa`; ampliar o enum é decisão de produto. |
 | Volume de parceiros/imóveis | Nada estrutural na v1 | <20 parceiros, <5k imóveis. |
@@ -399,8 +530,8 @@ Por anúncio:
 
 ```bash
 pnpm db:migrate && pnpm db:seed
-pnpm test:rls     # 26 testes: isolamento, anonimização, RLS da importação
-pnpm test:api     # 150 testes: auth, carteira, busca, mídia, importação, parser, SSRF
+pnpm test:rls     # 31 testes: isolamento, anonimização, RLS da importação e das conexões
+pnpm test:api     # 170 testes: auth, carteira, busca, mídia, importação, parser, SSRF, conexões, curadoria
 ```
 
 **Fim a fim, manual**
@@ -409,5 +540,9 @@ pnpm test:api     # 150 testes: auth, carteira, busca, mídia, importação, par
 3. DevTools → Network: JSON cru da busca sem identificador de A, sem `tenant_id`, sem `zone`.
 4. `exiftool` numa foto do resultado — sem GPS, autor ou copyright.
 5. `GET /properties/:id` do imóvel de A autenticado como B → 404.
-6. Como admin de A: `POST /imports/sources`, depois `POST /imports/sources/:id/upload` com um XML
-   VrSync (dry-run) → `GET /imports/jobs/:id/items` mostra o diff e os itens em curadoria.
+6. Como admin de A, em **Importação**: cadastrar o feed, enviar um XML VrSync (simulação) → ver
+   contadores e diff; num item em curadoria, escolher o bairro e ligar a grafia; importar de
+   verdade e conferir que o imóvel entrou com as fotos.
+7. Como B: "Pedir conexão" num imóvel de A → em **Conexões**, o pedido aparece sem nada de A.
+   Como A: o pedido mostra quem pediu, com contato. A aprova → B passa a ver marca e contato de
+   A, e continua sem endereço. A trilha mostra `requested`, `approved` e `disclosed`.

@@ -28,7 +28,14 @@ export const runtime = 'nodejs';
 const API_BASE = process.env.API_INTERNAL_URL ?? 'http://localhost:3333';
 
 /** Nao e um proxy aberto: so estes prefixos chegam a API. */
-const ALLOWED_PREFIXES = new Set(['auth', 'catalog', 'properties', 'network', 'imports']);
+const ALLOWED_PREFIXES = new Set([
+  'auth',
+  'catalog',
+  'properties',
+  'network',
+  'imports',
+  'connections',
+]);
 
 const HOP_BY_HOP = new Set([
   'connection',
