@@ -23,3 +23,6 @@ Thumbs.db
 # artefatos locais de mídia gerados em dev
 tmp/
 .uploads/
+
+# Artefato incremental do TypeScript: muda a cada build.
+*.tsbuildinfo

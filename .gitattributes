@@ -1,0 +1,15 @@
+# Finais de linha estaveis entre maquinas.
+#
+# Sem isto, o Git no Windows converte LF para CRLF no checkout (core.autocrlf)
+# e o commit seguinte, vindo de outra maquina, aparece como arquivo inteiro
+# reescrito. Com text=auto eol=lf, o repositorio guarda LF e o checkout
+# entrega LF em qualquer sistema.
+* text=auto eol=lf
+
+# Binarios: nunca converter.
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.webp binary
+*.ico  binary
+*.pdf  binary
