@@ -12,6 +12,8 @@ interface Props {
   listing: NetworkListing;
   /** Finalidade buscada: decide qual valor fica em destaque num anuncio de venda e aluguel. */
   pricePurpose?: 'sale' | 'rent';
+  /** Filtros da busca, como estao na URL, para a ficha saber voltar para ca. */
+  searchQuery?: string;
   onRequestConnection?: (listingId: string) => void;
   requesting?: boolean;
 }
@@ -28,8 +30,20 @@ interface Spec {
  * imobiliaria, contato, titulo, descricao nem endereco -- e nao ha como
  * mostrar, porque a API nao entrega. O bairro e o endereco possivel.
  */
-export function ListingRow({ listing, pricePurpose, onRequestConnection, requesting }: Props) {
+export function ListingRow({
+  listing,
+  pricePurpose,
+  searchQuery,
+  onRequestConnection,
+  requesting,
+}: Props) {
   const [photoFailed, setPhotoFailed] = useState(false);
+
+  // Os filtros viajam junto para a ficha poder devolver o corretor a esta
+  // mesma lista, na mesma posicao de sempre.
+  const href = searchQuery
+    ? `/imovel/${listing.listingId}?busca=${encodeURIComponent(searchQuery)}`
+    : `/imovel/${listing.listingId}`;
 
   // Numero em cima, unidade embaixo: o corretor compara coluna com coluna
   // descendo a lista, sem ler frase por frase.
@@ -74,7 +88,16 @@ export function ListingRow({ listing, pricePurpose, onRequestConnection, request
 
       <div className={styles.rowBody}>
         <div className={styles.place}>
-          <span className={styles.neighborhood}>{listing.neighborhood.name}</span>
+          {/* O link mora no bairro e se estica por cima da linha inteira (ver
+              .neighborhoodLink). Envolver a linha toda num <a> poria o botao
+              de conexao dentro do link: HTML invalido e clique ambiguo. */}
+          <Link
+            href={href}
+            className={`${styles.neighborhood} ${styles.neighborhoodLink}`}
+            aria-label={`${TYPE_LABELS[listing.type]} em ${listing.neighborhood.name}`}
+          >
+            {listing.neighborhood.name}
+          </Link>
           <span className={styles.cityTag}>
             {listing.city.name}/{listing.city.uf}
           </span>

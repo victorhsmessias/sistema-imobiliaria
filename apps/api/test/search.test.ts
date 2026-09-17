@@ -252,6 +252,97 @@ describe('busca na rede', () => {
     });
   });
 
+  describe('anuncio aberto', () => {
+    it('devolve o mesmo anuncio da lista, agora com a galeria', async () => {
+      const { items } = await search('limit=50');
+      const alvo = items.find((i) => !i.isOwn)!;
+
+      const response = await app.inject({
+        method: 'GET',
+        url: `/network/listings/${alvo.listingId}`,
+        cookies,
+      });
+      expect(response.statusCode).toBe(200);
+
+      const listing = response.json().listing;
+      expect(listing.listingId).toBe(alvo.listingId);
+      expect(listing.neighborhood.id).toBe(alvo.neighborhood.id);
+      expect(listing.isOwn).toBe(false);
+      expect(Array.isArray(listing.media)).toBe(true);
+
+      // A galeria bate com a contagem da lista, e cada foto e um id opaco.
+      expect(listing.media.length).toBe(listing.photoCount);
+      for (const media of listing.media) {
+        expect(media.id).toMatch(/^[0-9a-f-]{36}$/);
+        expect(Object.keys(media).sort()).toEqual(['height', 'id', 'kind', 'position', 'width']);
+      }
+    });
+
+    it('abrir o anuncio NAO revela nada a mais do dono', async () => {
+      const { items } = await search('limit=50');
+      const alvo = items.find((i) => !i.isOwn)!;
+
+      const response = await app.inject({
+        method: 'GET',
+        url: `/network/listings/${alvo.listingId}`,
+        cookies,
+      });
+
+      const forbidden: string[] = [];
+      for (const tenant of fixture.tenants) {
+        forbidden.push(tenant.id, tenant.legalName, tenant.displayName, tenant.slug);
+        forbidden.push(...tenant.emails, ...tenant.names, ...tenant.phones);
+      }
+      expect(forbidden.filter((valor) => response.body.includes(valor))).toEqual([]);
+      expect(response.body).not.toContain('tenant');
+      expect(response.body).not.toContain('storage_key');
+      expect(response.body).not.toContain('media/');
+
+      // Nem texto livre, nem endereco.
+      const sensiveis = await withOracle(async (client) => {
+        const { rows } = await client.query<Record<string, string | null>>(
+          `SELECT title, description, street, reference_code FROM properties WHERE id = $1`,
+          [alvo.listingId],
+        );
+        return rows[0]!;
+      });
+      for (const [campo, valor] of Object.entries(sensiveis)) {
+        if (typeof valor === 'string' && valor.length > 6) {
+          expect(response.body.includes(valor), `${campo} vazou no detalhe`).toBe(false);
+        }
+      }
+    });
+
+    it('imovel fora da rede responde 404, como se nao existisse', async () => {
+      const retido = await withOracle(async (client) => {
+        const { rows } = await client.query<{ id: string }>(`
+          SELECT id FROM properties
+           WHERE deleted_at IS NOT NULL OR status <> 'active' OR NOT published_to_network
+           LIMIT 1
+        `);
+        return rows[0]!.id;
+      });
+
+      for (const id of [retido, '11111111-1111-1111-1111-111111111111']) {
+        const response = await app.inject({
+          method: 'GET',
+          url: `/network/listings/${id}`,
+          cookies,
+        });
+        expect(response.statusCode, id).toBe(404);
+      }
+    });
+
+    it('exige sessao', async () => {
+      const { items } = await search('limit=5');
+      const response = await app.inject({
+        method: 'GET',
+        url: `/network/listings/${items[0]!.listingId}`,
+      });
+      expect(response.statusCode).toBe(401);
+    });
+  });
+
   describe('paginacao por keyset', () => {
     it('percorre todas as paginas sem repetir nem pular resultado', async () => {
       // Com OFFSET, um imovel cadastrado entre duas paginas empurraria a lista

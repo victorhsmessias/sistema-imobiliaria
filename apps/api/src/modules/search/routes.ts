@@ -1,8 +1,11 @@
 import { searchFilters } from '@imob/contracts';
 import type { FastifyInstance } from 'fastify';
+import { z } from 'zod';
 import { parseOrThrow } from '../../lib/validate.js';
 import { tenantOf } from '../../plugins/auth.js';
 import * as service from './service.js';
+
+const idParams = z.object({ id: z.string().uuid() });
 
 export async function searchRoutes(app: FastifyInstance): Promise<void> {
   /**
@@ -24,6 +27,24 @@ export async function searchRoutes(app: FastifyInstance): Promise<void> {
     async (request) => {
       const filters = parseOrThrow(searchFilters, request.query);
       return service.search(tenantOf(request), filters);
+    },
+  );
+
+  /**
+   * Um anuncio da rede, com a galeria.
+   *
+   * Le a mesma view da busca. Anuncio fora da rede responde 404 -- e nao 403,
+   * que ja confirmaria que ele existe.
+   */
+  app.get(
+    '/network/listings/:id',
+    {
+      preHandler: app.requireTenant,
+      config: { rateLimit: { max: 240, timeWindow: '1 minute' } },
+    },
+    async (request) => {
+      const { id } = parseOrThrow(idParams, request.params);
+      return { listing: await service.getListing(tenantOf(request), id) };
     },
   );
 }

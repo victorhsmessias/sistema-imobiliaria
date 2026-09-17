@@ -26,7 +26,15 @@ COPY tsconfig.base.json ./
 
 # Telemetria desligada: build de produção não manda dados para fora.
 ENV NEXT_TELEMETRY_DISABLED=1
+# Liga o empacotamento standalone (ver apps/web/next.config.ts). Fica aqui, e
+# nao no config, porque criar os symlinks do standalone falha com EPERM no
+# Windows -- e o build local nao tem por que pagar por um artefato de imagem.
+ENV NEXT_OUTPUT_STANDALONE=1
 RUN pnpm --filter @imob/web build
+
+# Falha cedo se o standalone nao tiver sido gerado: sem isto, o erro so
+# apareceria como "Cannot find module" no start do container.
+RUN test -f apps/web/.next/standalone/apps/web/server.js
 
 # ---------------------------------------------------------------------------
 # Runtime: só o standalone. Sem pnpm, sem código-fonte, sem devDependencies.

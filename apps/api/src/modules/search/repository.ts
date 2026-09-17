@@ -175,6 +175,84 @@ function buildFilters(filters: SearchFilters): SQL[] {
   return conditions;
 }
 
+/**
+ * Colunas do anuncio, compartilhadas pela lista e pelo detalhe.
+ *
+ * Uma lista so: a busca e o detalhe precisam expor exatamente o mesmo
+ * conjunto, e duas copias divergiriam no dia em que alguem adicionasse um
+ * campo em apenas uma delas.
+ */
+const LISTING_COLUMNS = sql`
+  l.listing_id,
+  l.type::text        AS type,
+  l.purpose::text     AS purpose,
+  l.city_id,
+  c.name              AS city_name,
+  c.uf                AS city_uf,
+  l.neighborhood_id,
+  n.name              AS neighborhood_name,
+  l.bedrooms, l.suites, l.bathrooms, l.parking_spots,
+  l.area_total, l.area_built,
+  l.sale_price_cents, l.rent_price_cents, l.condo_fee_cents, l.iptu_cents, l.currency,
+  l.accepts_exchange,
+  -- Formatado aqui, e nao no Node: em execute() cru o driver devolve o
+  -- timestamp como string do Postgres ("2026-09-12 21:00:00.12+00"), que
+  -- nao e ISO-8601 e nao satisfaz o contrato. to_char torna o formato
+  -- explicito e independente de parser do driver.
+  to_char(l.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS created_at,
+  to_char(l.updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS updated_at,
+  (SELECT count(*) FROM network_listing_media m WHERE m.listing_id = l.listing_id)
+                      AS photo_count,
+  -- Sai da view network_listing_media, que ja exige sanitized_at: a capa
+  -- nunca e uma foto que ainda carrega EXIF.
+  (SELECT m.media_id FROM network_listing_media m
+    WHERE m.listing_id = l.listing_id
+    ORDER BY m.position, m.media_id LIMIT 1)
+                      AS cover_media_id
+`;
+
+const LISTING_FROM = sql`
+  FROM network_listings l
+  JOIN cities c        ON c.id = l.city_id
+  JOIN neighborhoods n ON n.id = l.neighborhood_id
+`;
+
+/**
+ * Um anuncio pelo id, para a tela de detalhe.
+ *
+ * Le a MESMA view da busca: um anuncio fora da rede (rascunho, arquivado,
+ * retido pelo parceiro ou excluido) simplesmente nao existe aqui, e a rota
+ * responde 404 -- nao 403, que ja confirmaria a existencia.
+ */
+export async function findById(listingId: string): Promise<NetworkRow | null> {
+  const { rows } = await getDb().execute(sql`
+    SELECT ${LISTING_COLUMNS}, l.updated_at AS sort_value
+    ${LISTING_FROM}
+    WHERE l.listing_id = ${listingId}::uuid
+    LIMIT 1
+  `);
+  return (rows[0] as unknown as NetworkRow | undefined) ?? null;
+}
+
+export interface NetworkMediaRow {
+  media_id: string;
+  kind: string;
+  position: number;
+  width: number | null;
+  height: number | null;
+}
+
+/** Galeria do anuncio. So midia sanitizada -- a view ja exige sanitized_at. */
+export async function listMedia(listingId: string): Promise<NetworkMediaRow[]> {
+  const { rows } = await getDb().execute(sql`
+    SELECT m.media_id, m.kind::text AS kind, m.position, m.width, m.height
+      FROM network_listing_media m
+     WHERE m.listing_id = ${listingId}::uuid
+     ORDER BY m.position, m.media_id
+  `);
+  return rows as unknown as NetworkMediaRow[];
+}
+
 export async function search(filters: SearchFilters): Promise<NetworkRow[]> {
   const conditions = buildFilters(filters);
   const { value: sortValue, direction, cursorCast } = sortExpression(filters.sort, filters.purpose);
@@ -204,37 +282,8 @@ export async function search(filters: SearchFilters): Promise<NetworkRow[]> {
 
   // limit + 1: a linha extra so serve para saber se existe proxima pagina.
   const query = sql`
-    SELECT
-      l.listing_id,
-      l.type::text        AS type,
-      l.purpose::text     AS purpose,
-      l.city_id,
-      c.name              AS city_name,
-      c.uf                AS city_uf,
-      l.neighborhood_id,
-      n.name              AS neighborhood_name,
-      l.bedrooms, l.suites, l.bathrooms, l.parking_spots,
-      l.area_total, l.area_built,
-      l.sale_price_cents, l.rent_price_cents, l.condo_fee_cents, l.iptu_cents, l.currency,
-      l.accepts_exchange,
-      -- Formatado aqui, e nao no Node: em execute() cru o driver devolve o
-      -- timestamp como string do Postgres ("2026-09-12 21:00:00.12+00"), que
-      -- nao e ISO-8601 e nao satisfaz o contrato. to_char torna o formato
-      -- explicito e independente de parser do driver.
-      to_char(l.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS created_at,
-      to_char(l.updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS updated_at,
-      (SELECT count(*) FROM network_listing_media m WHERE m.listing_id = l.listing_id)
-                          AS photo_count,
-      -- Sai da view network_listing_media, que ja exige sanitized_at: a capa
-      -- nunca e uma foto que ainda carrega EXIF.
-      (SELECT m.media_id FROM network_listing_media m
-        WHERE m.listing_id = l.listing_id
-        ORDER BY m.position, m.media_id LIMIT 1)
-                          AS cover_media_id,
-      ${sortValue}        AS sort_value
-    FROM network_listings l
-    JOIN cities c        ON c.id = l.city_id
-    JOIN neighborhoods n ON n.id = l.neighborhood_id
+    SELECT ${LISTING_COLUMNS}, ${sortValue} AS sort_value
+    ${LISTING_FROM}
     ${where}
     ORDER BY ${sortValue} ${order}, l.listing_id ${order}
     LIMIT ${filters.limit + 1}

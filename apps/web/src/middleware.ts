@@ -21,5 +21,14 @@ export function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/busca/:path*', '/carteira/:path*'],
+  // Toda rota atras de sessao entra aqui. Faltando no matcher, a casca chega a
+  // ser desenhada antes de o SessionProvider mandar para o login -- que e
+  // exatamente o que este arquivo existe para evitar.
+  matcher: [
+    '/busca/:path*',
+    '/carteira/:path*',
+    '/imovel/:path*',
+    '/conexoes/:path*',
+    '/importacao/:path*',
+  ],
 };

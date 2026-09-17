@@ -528,6 +528,7 @@ export function SearchView() {
                 key={listing.listingId}
                 listing={listing}
                 pricePurpose={filters.purpose === 'any' ? undefined : filters.purpose}
+                searchQuery={urlQuery}
                 onRequestConnection={(id) => void requestConnection(id)}
                 requesting={requestingId === listing.listingId}
               />

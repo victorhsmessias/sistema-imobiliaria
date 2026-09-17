@@ -157,6 +157,34 @@ export const networkListing = z.object({
 });
 export type NetworkListing = z.infer<typeof networkListing>;
 
+/**
+ * Uma foto do anuncio, como a rede a enxerga.
+ *
+ * `id` e um ponteiro opaco: os bytes saem por
+ * GET /network/listings/:id/media/:mediaId, como URL assinada de vida curta.
+ * Nao ha nome de arquivo, chave de bucket nem URL de origem -- qualquer um
+ * dos tres entregaria o dono (ver docs/anonimizacao.md).
+ */
+export const networkMedia = z.object({
+  id: z.string().uuid(),
+  kind: z.enum(['photo', 'floor_plan', 'video', 'tour']),
+  position: z.number().int(),
+  width: z.number().int().nullable(),
+  height: z.number().int().nullable(),
+});
+export type NetworkMedia = z.infer<typeof networkMedia>;
+
+/**
+ * O anuncio aberto: os MESMOS campos da lista, mais a galeria.
+ *
+ * Abrir um imovel nao revela nada a mais sobre quem anuncia. Se um campo novo
+ * so faz sentido "na tela de detalhe", ele provavelmente identifica o dono.
+ */
+export const networkListingDetail = networkListing.extend({
+  media: z.array(networkMedia),
+});
+export type NetworkListingDetail = z.infer<typeof networkListingDetail>;
+
 export const searchResult = z.object({
   items: z.array(networkListing),
   /** Null quando nao ha mais paginas. */

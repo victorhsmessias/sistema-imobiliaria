@@ -1,5 +1,12 @@
-import type { ConnectionStatus, NetworkListing, SearchFilters, SearchResult } from '@imob/contracts';
+import type {
+  ConnectionStatus,
+  NetworkListing,
+  NetworkListingDetail,
+  SearchFilters,
+  SearchResult,
+} from '@imob/contracts';
 import { inArray, isNull, and, properties, withTenant } from '@imob/db';
+import { notFound } from '../../lib/errors.js';
 import * as connectionsRepo from '../connections/repository.js';
 import * as repo from './repository.js';
 
@@ -71,6 +78,39 @@ function toListing(
     // Ja vem em ISO-8601 UTC, formatado pelo SQL (ver repository.ts).
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+  };
+}
+
+/**
+ * Um anuncio aberto, com a galeria.
+ *
+ * Mesma origem da lista (a view network_listings) e mesmos campos: abrir o
+ * imovel nao revela nada a mais sobre quem anuncia. As fotos vem como ids
+ * opacos; os bytes saem por /network/listings/:id/media/:mediaId.
+ */
+export async function getListing(
+  tenantId: string,
+  listingId: string,
+): Promise<NetworkListingDetail> {
+  const row = await repo.findById(listingId);
+  // Fora da rede (rascunho, arquivado, retido ou excluido) e indistinguivel
+  // de inexistente -- de proposito.
+  if (!row) throw notFound('Imóvel não encontrado na rede.');
+
+  const [context, media] = await Promise.all([
+    ownContext(tenantId, [listingId]),
+    repo.listMedia(listingId),
+  ]);
+
+  return {
+    ...toListing(row, context.own.has(listingId), context.connections.get(listingId) ?? null),
+    media: media.map((item) => ({
+      id: item.media_id,
+      kind: item.kind as NetworkListingDetail['media'][number]['kind'],
+      position: item.position,
+      width: item.width,
+      height: item.height,
+    })),
   };
 }
 
