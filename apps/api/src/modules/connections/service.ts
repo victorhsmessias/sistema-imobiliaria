@@ -295,3 +295,52 @@ export const reject = (actor: ActorContext, id: string, input: DecideConnectionI
   transition(actor, id, 'rejected', input.note);
 
 export const cancel = (actor: ActorContext, id: string) => transition(actor, id, 'cancelled', null);
+
+/**
+ * Revoga uma conexao aprovada. Operacao administrativa: a plataforma pode
+ * revogar uma conexao de um parceiro suspenso ou por abuso.
+ *
+ * A revogacao e idempotente: revogar uma conexao ja revogada retorna sem erro.
+ */
+export async function revoke(
+  actor: ActorContext,
+  id: string,
+  reason: string,
+): Promise<ConnectionDto> {
+  // Faz a revogacao via funcao SECURITY DEFINER.
+  const result = await repo.revokeApproved(id, reason);
+  if (!result) throw notFound('Conexão não encontrada.');
+
+  const { wasApproved, status, ownerTenantId } = result;
+
+  return withTenant(ownerTenantId, async (tx) => {
+    const row = await repo.findById(tx, id);
+    if (!row) throw notFound('Conexão não encontrada.');
+
+    // Se nao estava approved, valida: so approved pode ser revogada.
+    if (!wasApproved && status !== 'revoked') {
+      throw validationFailed({ status: `Esta conexão não pode ser revogada (status: "${status}").` });
+    }
+
+    // Se foi revogada agora (wasApproved = true), registra o evento e auditoria.
+    if (wasApproved) {
+      await repo.insertEvent(tx, {
+        connectionRequestId: id,
+        type: 'revoked',
+        metadata: { reason },
+      });
+      await recordAudit(tx, {
+        tenantId: ownerTenantId,
+        actorUserId: actor.userId,
+        action: 'connection.revoked_by_platform',
+        entityType: 'connection_request',
+        entityId: id,
+        metadata: { reason },
+        ip: actor.ip,
+        userAgent: actor.userAgent,
+      });
+    }
+
+    return hydrate(tx, row, actor, await loadListing(tx, id));
+  });
+}

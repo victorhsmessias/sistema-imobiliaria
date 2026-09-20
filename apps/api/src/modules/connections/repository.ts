@@ -228,3 +228,31 @@ export async function statusByListing(
     ),
   );
 }
+
+/** Revoga uma conexao aprovada. Retorna o resultado: was_approved indica se foi revogada agora. */
+export async function revokeApproved(
+  requestId: string,
+  reason: string,
+): Promise<{
+  id: string;
+  status: ConnectionStatus;
+  ownerTenantId: string;
+  requesterTenantId: string;
+  wasApproved: boolean;
+} | null> {
+  const { rows } = await getDb().execute(
+    sql`SELECT id, status, owner_tenant_id, requester_tenant_id, was_approved FROM connection_revoke_by_platform(${requestId}::uuid, ${reason})`,
+  );
+  const row = rows[0] as
+    | { id: string; status: string; owner_tenant_id: string; requester_tenant_id: string; was_approved: boolean }
+    | undefined;
+  return row
+    ? {
+        id: row.id,
+        status: row.status as ConnectionStatus,
+        ownerTenantId: row.owner_tenant_id,
+        requesterTenantId: row.requester_tenant_id,
+        wasApproved: row.was_approved,
+      }
+    : null;
+}

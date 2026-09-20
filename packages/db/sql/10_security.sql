@@ -565,6 +565,38 @@ AS $$
     AND (r.requester_tenant_id = app_current_tenant() OR r.owner_tenant_id = app_current_tenant());
 $$;
 
+DROP FUNCTION IF EXISTS connection_revoke_by_platform(uuid, text);
+--
+CREATE FUNCTION connection_revoke_by_platform(p_request_id uuid, p_reason text)
+RETURNS TABLE (
+  id                  uuid,
+  status              connection_status,
+  owner_tenant_id     uuid,
+  requester_tenant_id uuid,
+  was_approved        boolean
+)
+  LANGUAGE sql
+  VOLATILE
+  SECURITY DEFINER
+  SET search_path = public, pg_temp
+AS $$
+  WITH updated AS (
+    UPDATE connection_requests
+    SET status = 'revoked', updated_at = now()
+    WHERE id = p_request_id
+      AND status = 'approved'
+    RETURNING id, status, owner_tenant_id, requester_tenant_id
+  )
+  SELECT u.id, u.status, u.owner_tenant_id, u.requester_tenant_id, true
+  FROM updated u
+  UNION ALL
+  SELECT r.id, r.status, r.owner_tenant_id, r.requester_tenant_id, false
+  FROM connection_requests r
+  WHERE r.id = p_request_id
+    AND NOT EXISTS (SELECT 1 FROM updated)
+  LIMIT 1;
+$$;
+
 
 -- ---------------------------------------------------------------------------
 -- Curadoria de alias de bairro
@@ -716,8 +748,10 @@ ALTER FUNCTION network_listing_owner(uuid)                                  OWNE
 ALTER FUNCTION connection_disclosure(uuid)                                  OWNER TO app_network_reader;
 ALTER FUNCTION connection_requester(uuid)                                   OWNER TO app_network_reader;
 ALTER FUNCTION connection_listing(uuid)                                     OWNER TO app_network_reader;
+ALTER FUNCTION connection_revoke_by_platform(uuid,text)                     OWNER TO app_network_reader;
 ALTER FUNCTION catalog_add_alias(uuid,text)                                 OWNER TO app_network_reader;
 GRANT SELECT, INSERT, UPDATE ON users, refresh_tokens TO app_network_reader;
+GRANT UPDATE ON connection_requests TO app_network_reader;
 GRANT SELECT ON tenants TO app_network_reader;
 -- As funcoes de conexao leem as duas pontas com os direitos do dono.
 GRANT SELECT ON connection_requests, properties, neighborhoods, cities TO app_network_reader;

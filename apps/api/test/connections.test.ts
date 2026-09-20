@@ -314,4 +314,177 @@ describe('conexoes entre parceiros', () => {
       expect(tarde.statusCode).toBe(422);
     });
   });
+
+  describe('revogacao pela plataforma', () => {
+    let adminCookies: Record<string, string>;
+    let approvedId: string;
+
+    beforeAll(async () => {
+      // Cria usuario platform_admin
+      await withOracle(async (client) => {
+        const result = await client.query<{ id: string }>(
+          `INSERT INTO users (email, password_hash, name, role)
+           VALUES ($1, $2, 'Platform Admin', 'platform_admin')
+           RETURNING id`,
+          ['admin@platform.test', '$2a$10$OIzJxb0fPrjGvGIKCPxqX.LB4xEYjLpVtN3oP.z1h1E2b3f3b3f3b'],
+        );
+        const userId = result.rows[0]?.id;
+        if (!userId) throw new Error('Nao conseguiu criar platform_admin');
+      });
+
+      // Faz login como admin da plataforma
+      const loginResult = await loginAs(app, 'admin@platform.test');
+      adminCookies = loginResult.cookies;
+
+      // Aprova um pedido para testar revogacao
+      const response = await pedir(betaListings[5]!);
+      const id = response.json().connection.id;
+      await app.inject({
+        method: 'POST',
+        url: `/connections/${id}/approve`,
+        cookies: beta,
+      });
+      approvedId = id;
+    });
+
+    it('revoga uma conexao aprovada com motivo', async () => {
+      const response = await app.inject({
+        method: 'POST',
+        url: `/connections/${approvedId}/revoke`,
+        cookies: adminCookies,
+        payload: { reason: 'Parceiro suspenso por violacao de uso aceitavel' },
+      });
+
+      expect(response.statusCode).toBe(200);
+      const connection = response.json().connection;
+      expect(connection.status).toBe('revoked');
+      expect(connection.role).toBe('owner'); // Ve como dono
+    });
+
+    it('idempotencia: revogar de novo nao da erro', async () => {
+      const response = await app.inject({
+        method: 'POST',
+        url: `/connections/${approvedId}/revoke`,
+        cookies: adminCookies,
+        payload: { reason: 'Segunda tentativa' },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json().connection.status).toBe('revoked');
+    });
+
+    it('nao-admin nao consegue revogar (403)', async () => {
+      const response = await pedir(betaListings[6]!);
+      const id = response.json().connection.id;
+      await app.inject({
+        method: 'POST',
+        url: `/connections/${id}/approve`,
+        cookies: beta,
+      });
+
+      const revoga = await app.inject({
+        method: 'POST',
+        url: `/connections/${id}/revoke`,
+        cookies: alfa,
+        payload: { reason: 'Motivo qualquer' },
+      });
+
+      expect(revoga.statusCode).toBe(403);
+    });
+
+    it('conexao inexistente retorna 404', async () => {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/connections/00000000-0000-0000-0000-000000000000/revoke',
+        cookies: adminCookies,
+        payload: { reason: 'Qualquer motivo' },
+      });
+
+      expect(response.statusCode).toBe(404);
+    });
+
+    it('nao revoga conexao que nao esta approved (422)', async () => {
+      const response = await pedir(betaListings[7]!);
+      const id = response.json().connection.id;
+
+      const revoga = await app.inject({
+        method: 'POST',
+        url: `/connections/${id}/revoke`,
+        cookies: adminCookies,
+        payload: { reason: 'Motivo qualquer' },
+      });
+
+      expect(revoga.statusCode).toBe(422);
+      expect(revoga.json().fields).toHaveProperty('status');
+    });
+
+    it('revogacao registra evento sem ator e auditoria', async () => {
+      const response = await pedir(betaListings[8]!);
+      const id = response.json().connection.id;
+
+      // Aprova
+      await app.inject({
+        method: 'POST',
+        url: `/connections/${id}/approve`,
+        cookies: beta,
+      });
+
+      // Revoga
+      await app.inject({
+        method: 'POST',
+        url: `/connections/${id}/revoke`,
+        cookies: adminCookies,
+        payload: { reason: 'Teste de auditoria' },
+      });
+
+      // Verifica evento
+      const details = await app.inject({
+        method: 'GET',
+        url: `/connections/${id}`,
+        cookies: beta,
+      });
+
+      const events = details.json().events;
+      const revokedEvent = events.find((e: { type: string }) => e.type === 'revoked');
+      expect(revokedEvent).toBeDefined();
+      expect(revokedEvent!.actor).toBe('platform'); // Nenhum tenant, é a plataforma
+    });
+
+    it('parceiro perde acesso apos revogacao (disclosure se vai)', async () => {
+      const response = await pedir(betaListings[9]!);
+      const id = response.json().connection.id;
+
+      // Alfa pede, Beta aprova
+      await app.inject({
+        method: 'POST',
+        url: `/connections/${id}/approve`,
+        cookies: beta,
+      });
+
+      // Alfa ve o disclosure (contato da Beta)
+      let visao = await app.inject({
+        method: 'GET',
+        url: `/connections/${id}`,
+        cookies: alfa,
+      });
+      expect(visao.json().connection.disclosure).toBeDefined();
+
+      // Revoga
+      await app.inject({
+        method: 'POST',
+        url: `/connections/${id}/revoke`,
+        cookies: adminCookies,
+        payload: { reason: 'Abuso comprovado' },
+      });
+
+      // Alfa nao consegue mais ver o disclosure
+      visao = await app.inject({
+        method: 'GET',
+        url: `/connections/${id}`,
+        cookies: alfa,
+      });
+      expect(visao.json().connection.disclosure).toBeUndefined();
+      expect(visao.json().connection.status).toBe('revoked');
+    });
+  });
 });
