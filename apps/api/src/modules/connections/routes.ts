@@ -1,7 +1,8 @@
 import { connectionListQuery, createConnectionInput, decideConnectionInput, revokeConnectionInput } from '@imob/contracts';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import { forbidden, parseOrThrow } from '../../lib/validate.js';
+import { forbidden } from '../../lib/errors.js';
+import { parseOrThrow } from '../../lib/validate.js';
 import { tenantOf } from '../../plugins/auth.js';
 import type { ActorContext } from '../properties/service.js';
 import * as service from './service.js';

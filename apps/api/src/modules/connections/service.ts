@@ -112,9 +112,9 @@ async function hydrate(
     return dto;
   }
 
-  // Solicitante: a funcao so devolve linha se a conexao estiver aprovada.
-  const disclosure = await repo.disclosureOf(tx, row.id);
-  if (disclosure) dto.disclosure = toParty(disclosure, row.disclosureLevel);
+  // Solicitante: so revela contato do dono DEPOIS de abrir (evento disclosed).
+  // Na listagem ou em outros contextos, nao mostra -- precisa entrar em detalhe.
+  // O disclosure sera adicionado por quem chama hydrate() se apropriado.
   return dto;
 }
 
@@ -218,15 +218,24 @@ export async function getById(
 
     const connection = await hydrate(tx, row, actor, await loadListing(tx, row.id));
 
-    // Primeira vez que o solicitante abre os dados revelados vira evento: e o
-    // registro que sustenta uma disputa de comissao depois.
-    if (connection.disclosure && !(await repo.hasDisclosureEvent(tx, row.id))) {
+    const isRequester = row.requesterTenantId === actor.tenantId;
+    const isApproved = row.status === 'approved';
+
+    // Solicitante abrindo conexao aprovada pela primeira vez: registra evento
+    // disclosed e depois revela contato do dono. O evento e prova de que viu.
+    if (isRequester && isApproved && !(await repo.hasDisclosureEvent(tx, row.id))) {
       await repo.insertEvent(tx, {
         connectionRequestId: row.id,
         type: 'disclosed',
         actorTenantId: actor.tenantId,
         actorUserId: actor.userId,
       });
+    }
+
+    // Depois de criar evento, carrega o disclosure e adiciona ao DTO.
+    if (isRequester && isApproved && (await repo.hasDisclosureEvent(tx, row.id))) {
+      const disclosure = await repo.disclosureOf(tx, row.id);
+      if (disclosure) connection.disclosure = toParty(disclosure, row.disclosureLevel);
     }
 
     const events = await repo.listEvents(tx, row.id);
