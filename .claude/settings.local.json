@@ -1,11 +1,13 @@
 {
+  "permissions": {
+    "allow": [
+      "Bash(corepack pnpm *)",
+      "PowerShell(Write-Host \"Verificando serviços...\"; Write-Host \"\"; try { $r = Invoke-WebRequest -Uri \"http://localhost:3000\" -TimeoutSec 5 -ErrorAction Stop; Write-Host \"✓ Web \\(3000\\): OK \\($\\($r.StatusCode\\)\\)\" } catch { Write-Host \"✗ Web \\(3000\\): Ainda iniciando...\" }; try { $r = Invoke-WebRequest -Uri \"http://localhost:3100/health\" -TimeoutSec 5 -ErrorAction Stop; Write-Host \"✓ API \\(3100\\): OK \\($\\($r.StatusCode\\)\\)\" } catch { Write-Host \"✗ API \\(3100\\): Ainda iniciando...\" }; Write-Host \"\"; Write-Host \"Serviços devem estar prontos em ~30s. Acesse http://localhost:3000 no navegador.\")",
+      "PowerShell(Get-Job *)"
+    ]
+  },
   "enabledPlugins": {
     "frontend-design@claude-plugins-official": true,
     "superpowers@claude-plugins-official": true
-  },
-  "permissions": {
-    "allow": [
-      "Bash(corepack pnpm *)"
-    ]
   }
 }
