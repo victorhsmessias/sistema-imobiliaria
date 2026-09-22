@@ -61,6 +61,16 @@ export const decideConnectionInput = z.object({
 });
 export type DecideConnectionInput = z.infer<typeof decideConnectionInput>;
 
+export const revokeConnectionInput = z.object({
+  /** Motivo da revogação. Obrigatório e auditável. */
+  reason: z
+    .string()
+    .trim()
+    .min(1)
+    .max(500),
+});
+export type RevokeConnectionInput = z.infer<typeof revokeConnectionInput>;
+
 export const connectionListQuery = z.object({
   /** `received`: pedidos sobre os meus imoveis. `sent`: os que eu fiz. */
   role: z.enum(['received', 'sent']).default('received'),
