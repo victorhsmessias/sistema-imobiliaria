@@ -125,6 +125,9 @@ importers:
 
   packages/db:
     dependencies:
+      '@node-rs/argon2':
+        specifier: ^2.0.2
+        version: 2.2.1
       dotenv:
         specifier: ^16.4.7
         version: 16.6.1
@@ -138,9 +141,6 @@ importers:
         specifier: ^4.19.2
         version: 4.23.13
     devDependencies:
-      '@node-rs/argon2':
-        specifier: ^2.0.2
-        version: 2.2.1
       '@types/pg':
         specifier: ^8.11.10
         version: 8.23.1
