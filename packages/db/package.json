@@ -21,13 +21,13 @@
     "catalog:import": "tsx src/catalog-import.ts"
   },
   "dependencies": {
+    "@node-rs/argon2": "^2.0.2",
     "dotenv": "^16.4.7",
     "drizzle-orm": "^0.44.2",
     "pg": "^8.13.1",
     "tsx": "^4.19.2"
   },
   "devDependencies": {
-    "@node-rs/argon2": "^2.0.2",
     "@types/pg": "^8.11.10",
     "drizzle-kit": "^0.31.1",
     "typescript": "^5.7.3",
