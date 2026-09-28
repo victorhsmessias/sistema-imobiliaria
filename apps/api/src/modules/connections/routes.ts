@@ -75,10 +75,8 @@ export async function connectionRoutes(app: FastifyInstance): Promise<void> {
     async (request, reply) => {
       const { id } = parseOrThrow(idParams, request.params);
       const input = parseOrThrow(revokeConnectionInput, request.body);
-      // A revogacao usa ownerTenantId da conexao para contexto (obtido dentro do service).
-      // Aqui so passamos userId para auditoria.
-      const actor: ActorContext = {
-        tenantId: request.auth!.userId,
+      // Sem tenant: o service descobre o dono da conexao dentro da transacao.
+      const actor: service.PlatformActor = {
         userId: request.auth!.userId,
         ip: request.ip,
         userAgent: request.headers['user-agent'] ?? null,

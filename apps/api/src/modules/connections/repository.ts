@@ -229,8 +229,15 @@ export async function statusByListing(
   );
 }
 
-/** Revoga uma conexao aprovada. Retorna o resultado: was_approved indica se foi revogada agora. */
+/**
+ * Revoga uma conexao aprovada. `was_approved` indica se foi revogada agora.
+ *
+ * Recebe a transacao de quem chama: o evento e a auditoria precisam entrar na
+ * mesma transacao, senao uma falha entre os dois deixa a conexao revogada sem
+ * trilha -- e a nova tentativa, idempotente, nunca mais grava o evento.
+ */
 export async function revokeApproved(
+  tx: Tx,
   requestId: string,
   reason: string,
 ): Promise<{
@@ -240,7 +247,7 @@ export async function revokeApproved(
   requesterTenantId: string;
   wasApproved: boolean;
 } | null> {
-  const { rows } = await getDb().execute(
+  const { rows } = await tx.execute(
     sql`SELECT id, status, owner_tenant_id, requester_tenant_id, was_approved FROM connection_revoke_by_platform(${requestId}::uuid, ${reason})`,
   );
   const row = rows[0] as
