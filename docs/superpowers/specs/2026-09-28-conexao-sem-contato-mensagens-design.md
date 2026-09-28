@@ -50,7 +50,7 @@ O contato sai **no banco**, para nenhuma consulta futura conseguir recuperá-lo.
 | `connection_request_id` | uuid FK → `connection_requests` | `on delete cascade`, como `connection_events` |
 | `sender_tenant_id` | uuid FK → `tenants` | |
 | `sender_user_id` | uuid FK → `users` | `on delete set null` |
-| `body` | text not null | já mascarado; 1–2000 caracteres (check) |
+| `body` | text not null | já mascarado. Check `char_length` 1–8000: a API limita a entrada a 2000, mas a máscara pode alongar o texto |
 | `body_original` | text null | preenchido só quando houve máscara |
 | `created_at` | timestamptz | `now()` |
 
@@ -106,7 +106,11 @@ Cria as duas tabelas, troca as duas funções, ajusta grants. Sem backfill, ent�
 - `unreadCount` = mensagens da outra parte com `created_at > last_read_at` (ou todas, sem
   linha de leitura). Calculado numa consulta só para a lista inteira.
 - O `create` (recado) e o `reject` (nota) passam pelo mesmo filtro antes de gravar.
-- Auditoria: `connection.message_masked` no `audit_log` só quando a máscara age.
+- Auditoria: `connection.message_masked` no `audit_log` só quando a máscara age, com
+  `metadata.field` (`body`, `message` ou `decision_note`). Recado e nota não têm coluna de
+  original: o texto original vai em `metadata.original` dessa entrada, que fica no tenant de
+  quem escreveu e a outra parte não lê. A mensagem guarda o original em `body_original` e a
+  auditoria leva só `messageId`.
 
 ### Filtro (`apps/api/src/lib/contact-filter.ts`)
 
