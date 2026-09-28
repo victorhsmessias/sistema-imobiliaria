@@ -1,6 +1,7 @@
 # Próximos passos
 
-Estado em 28/09/2026, depois do deploy de `befdf52` (revogação atômica de conexões).
+Estado em 28/09/2026, depois do deploy de `befdf52` (revogação atômica de conexões) e do
+roteiro manual em produção.
 Este arquivo junta o que ficou em aberto; o detalhe de cada tarefa da Fase 1 continua em
 [`plano.md`](plano.md).
 
@@ -8,49 +9,62 @@ Este arquivo junta o que ficou em aberto; o detalhe de cada tarefa da Fase 1 con
 
 ---
 
-## 1. Terminar a validação da revogação em produção
+## 1. Validação da revogação em produção: concluída
 
-A revogação pela plataforma está em produção, mas só foi testada ponta a ponta na suíte
-automatizada (22/22 em `connections.test.ts`). O roteiro manual parou porque não existia
-conta `platform_admin`.
+Roteiro manual rodado em produção em 28/09/2026, pelo navegador, com as contas Alfa, Beta e
+`admin@platform.test`. A API se comportou como esperado em todos os casos; a tela tem um bug
+que já é tratado pela seção 2.
 
-**Situação do roteiro:**
+| Caso | Resultado | O que se viu |
+|---|---|---|
+| TC-001 Pedir, aprovar e revogar | API ok · **tela falhou** | Alfa pediu `58fc8742…` (conexão `0cc864a0…`), Beta aprovou pela tela, plataforma revogou (200, `role: "owner"`). A Alfa só via o contato pelo `GET /connections/:id`; na tela, nunca (bug abaixo) |
+| TC-002 Revogar duas vezes | passou | segunda chamada 200, um único evento `revoked` |
+| TC-003 Só a plataforma revoga | passou | rodado antes |
+| TC-004 ID inexistente | passou | 404; id que não é UUID dá 422 |
+| TC-005 Fora de `approved` | passou | pendente `98d64fb9…` e rejeitada `c944d472…`: 422, status e trilha intactos |
+| TC-006 Evento `revoked` como plataforma | passou | trilha `requested → approved → disclosed → revoked:platform` |
+| TC-007 Terceiro isolado | passou | rodado antes |
+| TC-008 Motivo obrigatório | passou | `{}`, `""` e `"   "`: 422. Sem corpo nenhum: 400 (parser do Fastify) |
+| TC-009 Os dois lados veem `revoked` | passou | tela e API, Alfa e Beta |
+| TC-010 Nível de contato | API ok · tela não verificável | conexão G (`24020366…`, `partner`) devolve só a marca. Deixa de fazer sentido com a seção 2 |
 
-| Caso | Status |
-|---|---|
-| TC-003 Só a plataforma revoga · TC-007 Terceiro isolado | passaram |
-| TC-001 Pedir, aprovar e revogar · TC-010 Nível de contato | parciais: falta a parte da revogação |
-| TC-002 Revogar duas vezes · TC-004 ID inexistente · TC-005 Fora de `approved` · TC-006 Evento `revoked` como plataforma · TC-008 Motivo obrigatório · TC-009 Os dois lados veem `revoked` | não rodados |
+A única conexão revogada foi a `0cc864a0…`, criada para o TC-001. Nenhum JSON visto pela
+Alfa trouxe nome, contato, `tenant_id` ou endereço da Beta antes do aceite ou depois da
+revogação.
 
-**O que já está pronto para o testador:**
+**Achados:**
 
-- Conta `admin@platform.test` (papel `platform_admin`, sem tenant). A senha foi entregue
-  fora do repositório.
-- Seis conexões aprovadas entre Alfa e Beta, uma pendente (`98d64fb9…`) e uma rejeitada
-  (`c944d472…`) para o TC-005.
-- A "conexão G" (`24020366…`) foi colocada em `disclosure_level = partner` para o TC-010.
-  Confirmar com o testador que é essa a conexão G.
-
-**Já verificado depois do deploy**, sem alterar dados: login do admin (200), revogar
-pendente (422, status continua `pending`), ID inexistente (404), sem motivo (422).
-
-**Comportamento esperado que mudou:** a resposta da revogação agora vem com
-`role: "owner"`. Antes vinha `requester`, porque a rota usava o id do usuário como tenant.
+- **A tela `/conexoes` nunca mostra o contato a quem pediu.** A lista vem de
+  `GET /connections`, e `list()` não inclui `disclosure`; só `GET /connections/:id` inclui,
+  e nenhuma tela chama essa rota. Por isso o evento `disclosed` só é gravado quando alguém
+  chama a API direto. Com a decisão da seção 2, o contato sai da conexão e o bug deixa de
+  existir; o evento `disclosed` precisa ser repensado junto.
+- Revogar sem corpo com `content-type: application/json` dá 400, não 422. Continua
+  bloqueado; só o código difere.
+- `platform_admin` não tem tela: cai em `/busca`, vê "Sessão sem parceiro associado." e o
+  cliente faz 401 → refresh → 401.
+- Depois de uma revogação pela plataforma, quem pediu vê "Pedir de novo" no anúncio e pode
+  abrir outro pedido. Decidir se revogação deve bloquear novo pedido no mesmo imóvel.
+- As respostas saem com `access-control-allow-origin: http://143.95.167.29:3100` (IP, não o
+  domínio). O proxy é same-origin, então não quebra nada.
 
 ---
 
-## 2. Decisão de produto: quem escolhe o nível de contato (TC-010)
+## 2. Decisão de produto: contato nunca é revelado; conversa pelo sistema
 
-O [`plano.md`](plano.md) dá como resolvido que o `disclosure_level` é "por pedido": só a
-marca do parceiro, ou marca + contato do corretor. O corte funciona (`toParty` em
-`connections/service.ts`), mas **não existe como escolher o nível**: o approve só aceita
-`note`, e o banco usa `partner_contact` como padrão. Todo aceite hoje libera o contato
-completo.
+**Decidido pelo cliente em 28/09/2026.** Substitui a pergunta anterior (quem escolhe o
+`disclosure_level`). Nenhum contato (telefone, e-mail, nome do corretor) aparece para a
+outra parte, nem depois do aceite. Aprovada a conexão, abre-se uma opção de **chamar a outra
+parte pelo próprio sistema**.
 
-| Opção | O que muda | Esforço |
-|---|---|---|
-| **A. O dono escolhe ao aprovar** | Campo opcional `disclosureLevel` no approve, seletor na tela de aceite | ~0,5 dia |
-| **B. Fica como está** | Registrar no plano que o padrão é contato completo; o nível `partner` só existe via banco | nenhum |
+Isso muda a regra "aprovar é que revela o dono" do [`plano.md`](plano.md) (tabela "Quem vê
+o quê" e a função `connection_disclosure`). Design em andamento; detalhes a definir antes de
+implementar:
+
+- se a marca do parceiro continua aparecendo depois do aceite;
+- se o dono também deixa de ver o contato de quem pediu;
+- como é a conversa (mensagens dentro da conexão, notificação por e-mail, sanitização de
+  telefone/e-mail no texto) e o que acontece com ela quando a conexão é revogada.
 
 ---
 

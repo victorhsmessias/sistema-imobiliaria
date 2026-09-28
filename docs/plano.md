@@ -410,6 +410,11 @@ credencia quem entra, arbitra e pode suspender. Rotas: `POST /connections`,
 `POST /connections/:id/{approve,reject,cancel}`. Qualquer usuário do parceiro usa (não exige
 `partner_admin`: é ato comercial, não configuração de conta).
 
+> **Revisado em 28/09/2026 (a implementar).** O cliente decidiu que nenhum contato aparece para a
+> outra parte, nem depois do aceite: os dois lados veem só a marca, e a negociação segue por
+> mensagens dentro do sistema. A tabela abaixo descreve o que está em produção hoje; a regra
+> nova está em [`superpowers/specs/2026-09-28-conexao-sem-contato-mensagens-design.md`](superpowers/specs/2026-09-28-conexao-sem-contato-mensagens-design.md).
+
 **Quem vê o quê:**
 
 | Momento | O dono vê | Quem pediu vê |
@@ -517,7 +522,7 @@ do Casafari e do Top Agent Network não foram verificadas.
 | Pendência | O que trava | Premissa para seguir |
 |---|---|---|
 | ~~Quem aprova a conexão~~ | — | **Resolvido (15/09/2026)**: o dono aprova cada pedido; a plataforma credencia, arbitra e pode suspender. |
-| ~~O que é liberado após aprovar~~ | — | **Resolvido**: `disclosure_level` por pedido — marca do parceiro, ou marca + contato do corretor. Endereço nunca. |
+| ~~O que é liberado após aprovar~~ | — | ~~Resolvido: `disclosure_level` por pedido~~. **Revisto em 28/09/2026**: só a marca, para os dois lados; contato nunca; conversa pelo sistema (ver spec de 28/09). Endereço nunca. |
 | **Termo de parceria antes de liberar o contato?** | Nada hoje | Em aberto. Tem precedente fora do imobiliário (M&A, ReferralExchange); no Brasil o termo vem depois do contato. Implementar exigiria uma coluna de aceite e uma etapa na tela. |
 | Revogação de conexão pela plataforma | Nada hoje | O status `revoked` já existe no schema; falta a rota de admin, que precisa de um caminho para `platform_admin` (hoje sem tenant no contexto). |
 | ~~XML traz fotos?~~ | — | **Resolvido**: VrSync traz em `<Media>`; re-hospedagem implementada. |
