@@ -144,6 +144,8 @@ const TENANT_DEFS = [
   },
 ] as const;
 
+const PLATFORM_ADMIN = { email: 'admin@platform.test', name: 'Administrador da Plataforma' } as const;
+
 const PROPERTY_TYPES = [
   'apartamento',
   'apartamento',
@@ -432,6 +434,18 @@ async function main(): Promise<void> {
 
       console.log(`[seed]   ${def.displayName}: ${def.propertyCount} imoveis, ${userRows.length} usuarios`);
     }
+
+    // Administrador da plataforma: sem tenant. E quem revoga conexoes; sem ele
+    // no seed, esse caminho nao tem como ser testado de ponta a ponta.
+    await db.insert(users).values({
+      tenantId: null,
+      email: PLATFORM_ADMIN.email,
+      passwordHash,
+      name: PLATFORM_ADMIN.name,
+      role: 'platform_admin',
+      status: 'active',
+    });
+    console.log(`[seed]   plataforma: ${PLATFORM_ADMIN.email}`);
 
     const networkCount = await pool.query<{ count: string }>(
       'SELECT count(*)::text AS count FROM network_listings',

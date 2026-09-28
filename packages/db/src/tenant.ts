@@ -28,14 +28,49 @@ export async function withTenant<T>(
   fn: (tx: Tx) => Promise<T>,
   db: Database = getDb(),
 ): Promise<T> {
+  assertTenantId(tenantId);
+
+  return db.transaction(async (tx) => {
+    await setTenant(tx, tenantId);
+    return fn(tx);
+  });
+}
+
+/**
+ * Transacao da plataforma que so descobre o tenant no meio do caminho.
+ *
+ * Caso de uso: platform_admin nao tem tenant, e o dono da linha so e conhecido
+ * depois de uma funcao SECURITY DEFINER (ex.: `connection_revoke_by_platform`).
+ * Abrir duas transacoes -- uma para a funcao, outra com withTenant para a
+ * trilha -- deixa uma janela em que a mudanca fica gravada sem o evento.
+ *
+ * Ate `enterTenant` ser chamado, a transacao nao tem app.tenant_id e o RLS
+ * devolve zero linhas de dado de parceiro; so funcoes SECURITY DEFINER passam.
+ * Depois dele, vale exatamente o mesmo regime de withTenant.
+ */
+export async function withLateTenant<T>(
+  fn: (tx: Tx, enterTenant: (tenantId: string) => Promise<void>) => Promise<T>,
+  db: Database = getDb(),
+): Promise<T> {
+  return db.transaction(async (tx) => {
+    let entered = false;
+    return fn(tx, async (tenantId) => {
+      if (entered) throw new Error('withLateTenant: tenant ja definido nesta transacao');
+      assertTenantId(tenantId);
+      await setTenant(tx, tenantId);
+      entered = true;
+    });
+  });
+}
+
+function assertTenantId(tenantId: string): void {
   if (!UUID_RE.test(tenantId)) {
     throw new Error(`tenantId invalido: ${JSON.stringify(tenantId)}`);
   }
+}
 
-  return db.transaction(async (tx) => {
-    await tx.execute(sql`SELECT set_config('app.tenant_id', ${tenantId}, true)`);
-    return fn(tx);
-  });
+async function setTenant(tx: Tx, tenantId: string): Promise<void> {
+  await tx.execute(sql`SELECT set_config('app.tenant_id', ${tenantId}, true)`);
 }
 
 /**

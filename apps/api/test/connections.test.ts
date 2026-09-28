@@ -320,20 +320,9 @@ describe('conexoes entre parceiros', () => {
     let approvedId: string;
 
     beforeAll(async () => {
-      // Cria usuario platform_admin
-      await withOracle(async (client) => {
-        const result = await client.query<{ id: string }>(
-          `INSERT INTO users (email, password_hash, name, role)
-           VALUES ($1, $2, 'Platform Admin', 'platform_admin')
-           RETURNING id`,
-          ['admin@platform.test', '$2a$10$OIzJxb0fPrjGvGIKCPxqX.LB4xEYjLpVtN3oP.z1h1E2b3f3b3f3b'],
-        );
-        const userId = result.rows[0]?.id;
-        if (!userId) throw new Error('Nao conseguiu criar platform_admin');
-      });
-
-      // Faz login como admin da plataforma
+      // O platform_admin vem do seed, com a mesma senha de demo dos parceiros.
       const loginResult = await loginAs(app, 'admin@platform.test');
+      expect(loginResult.statusCode).toBe(200);
       adminCookies = loginResult.cookies;
 
       // Aprova um pedido para testar revogacao

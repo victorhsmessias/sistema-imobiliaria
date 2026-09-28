@@ -7,7 +7,7 @@ import type {
   CreateConnectionInput,
   DecideConnectionInput,
 } from '@imob/contracts';
-import { withTenant, type ConnectionEvent, type ConnectionRequest, type Tx } from '@imob/db';
+import { withLateTenant, withTenant, type ConnectionEvent, type ConnectionRequest, type Tx } from '@imob/db';
 import { forbidden, notFound, validationFailed } from '../../lib/errors.js';
 import { recordAudit } from '../audit/service.js';
 import type { ActorContext } from '../properties/service.js';
@@ -305,33 +305,37 @@ export const reject = (actor: ActorContext, id: string, input: DecideConnectionI
 
 export const cancel = (actor: ActorContext, id: string) => transition(actor, id, 'cancelled', null);
 
+/** Quem age em nome da plataforma: platform_admin nao tem tenant. */
+export type PlatformActor = Omit<ActorContext, 'tenantId'>;
+
 /**
  * Revoga uma conexao aprovada. Operacao administrativa: a plataforma pode
  * revogar uma conexao de um parceiro suspenso ou por abuso.
  *
  * A revogacao e idempotente: revogar uma conexao ja revogada retorna sem erro.
+ *
+ * Tudo numa transacao so: a funcao SECURITY DEFINER muda o status e devolve o
+ * dono; so entao a transacao assume o tenant do dono para gravar evento e
+ * auditoria. Se qualquer passo falhar, o status volta a `approved`.
  */
 export async function revoke(
-  actor: ActorContext,
+  actor: PlatformActor,
   id: string,
   reason: string,
 ): Promise<ConnectionDto> {
-  // Faz a revogacao via funcao SECURITY DEFINER.
-  const result = await repo.revokeApproved(id, reason);
-  if (!result) throw notFound('Conexão não encontrada.');
+  return withLateTenant(async (tx, enterTenant) => {
+    const result = await repo.revokeApproved(tx, id, reason);
+    if (!result) throw notFound('Conexão não encontrada.');
 
-  const { wasApproved, status, ownerTenantId } = result;
-
-  return withTenant(ownerTenantId, async (tx) => {
-    const row = await repo.findById(tx, id);
-    if (!row) throw notFound('Conexão não encontrada.');
-
-    // Se nao estava approved, valida: so approved pode ser revogada.
+    const { wasApproved, status, ownerTenantId } = result;
     if (!wasApproved && status !== 'revoked') {
       throw validationFailed({ status: `Esta conexão não pode ser revogada (status: "${status}").` });
     }
 
-    // Se foi revogada agora (wasApproved = true), registra o evento e auditoria.
+    await enterTenant(ownerTenantId);
+    const row = await repo.findById(tx, id);
+    if (!row) throw notFound('Conexão não encontrada.');
+
     if (wasApproved) {
       await repo.insertEvent(tx, {
         connectionRequestId: id,
@@ -350,6 +354,9 @@ export async function revoke(
       });
     }
 
-    return hydrate(tx, row, actor, await loadListing(tx, id));
+    // A resposta sai na visao do dono: e a unica que nao revela nada alem do
+    // que a plataforma ja sabe (o solicitante aparece para o dono desde o pedido).
+    const ownerView: ActorContext = { ...actor, tenantId: ownerTenantId };
+    return hydrate(tx, row, ownerView, await loadListing(tx, id));
   });
 }
