@@ -448,6 +448,160 @@ describe('conexoes entre parceiros', () => {
     });
   });
 
+  describe('conversa', () => {
+    let conversa: string;
+    let pendente: string;
+    let revogada: string;
+    let adminCookies: Record<string, string>;
+
+    function enviar(cookies: Record<string, string>, id: string, body: string) {
+      return app.inject({ method: 'POST', url: `/connections/${id}/messages`, cookies, payload: { body } });
+    }
+
+    function mensagens(cookies: Record<string, string>, id: string, after?: string) {
+      const query = after ? `?after=${after}` : '';
+      return app.inject({ method: 'GET', url: `/connections/${id}/messages${query}`, cookies });
+    }
+
+    beforeAll(async () => {
+      expect(betaListings.length).toBeGreaterThan(15);
+      adminCookies = (await loginAs(app, 'admin@platform.test')).cookies;
+
+      conversa = (await pedir(betaListings[10]!)).json().connection.id;
+      await app.inject({ method: 'POST', url: `/connections/${conversa}/approve`, cookies: beta });
+
+      pendente = (await pedir(betaListings[11]!)).json().connection.id;
+
+      revogada = (await pedir(betaListings[12]!)).json().connection.id;
+      await app.inject({ method: 'POST', url: `/connections/${revogada}/approve`, cookies: beta });
+      await enviar(alfa, revogada, 'Mensagem antes da revogação.');
+      await app.inject({
+        method: 'POST',
+        url: `/connections/${revogada}/revoke`,
+        cookies: adminCookies,
+        payload: { reason: 'Teste da conversa só leitura' },
+      });
+    });
+
+    it('as duas partes conversam; o autor vem como you/other, sem nome de pessoa', async () => {
+      const ida = await enviar(alfa, conversa, 'Tenho um cliente para visitar sábado.');
+      expect(ida.statusCode).toBe(201);
+      expect(ida.json().masked).toBe(false);
+      expect(ida.json().message).toMatchObject({ body: 'Tenho um cliente para visitar sábado.', author: 'you' });
+      expect(Object.keys(ida.json().message).sort()).toEqual(['author', 'body', 'createdAt', 'id']);
+
+      const volta = await enviar(beta, conversa, 'Sábado às 10h funciona.');
+      expect(volta.statusCode).toBe(201);
+
+      const lidoPelaAlfa = await mensagens(alfa, conversa);
+      expect(lidoPelaAlfa.statusCode).toBe(200);
+      expect(lidoPelaAlfa.json().hasMore).toBe(false);
+      expect(lidoPelaAlfa.json().items.map((m: { author: string; body: string }) => [m.author, m.body])).toEqual([
+        ['you', 'Tenho um cliente para visitar sábado.'],
+        ['other', 'Sábado às 10h funciona.'],
+      ]);
+
+      const lidoPelaBeta = await mensagens(beta, conversa);
+      expect(lidoPelaBeta.json().items.map((m: { author: string }) => m.author)).toEqual(['other', 'you']);
+      expect(contatosDe('alfa-imoveis').filter((v) => lidoPelaBeta.body.includes(v))).toEqual([]);
+    });
+
+    it('after traz so as novas e nao repete a mensagem do cursor', async () => {
+      const todas = (await mensagens(alfa, conversa)).json().items;
+      const ultima = todas[todas.length - 1].id;
+
+      const nada = await mensagens(alfa, conversa, ultima);
+      expect(nada.statusCode).toBe(200);
+      expect(nada.json().items).toEqual([]);
+
+      await enviar(beta, conversa, 'Confirmado.');
+      const novas = (await mensagens(alfa, conversa, ultima)).json().items;
+      expect(novas.map((m: { body: string }) => m.body)).toEqual(['Confirmado.']);
+    });
+
+    it('mascara contato, avisa quem escreveu e guarda o original so no banco', async () => {
+      const response = await enviar(alfa, conversa, 'Me chama no 43 98010-1000 ou renata@alfa.com.br');
+      expect(response.statusCode).toBe(201);
+      expect(response.json().masked).toBe(true);
+      expect(response.json().message.body).toBe('Me chama no [contato removido] ou [contato removido]');
+
+      const { id } = response.json().message;
+      const gravado = await withOracle(async (client) => {
+        const { rows } = await client.query<{ body_original: string }>(
+          'SELECT body_original FROM connection_messages WHERE id = $1',
+          [id],
+        );
+        const audit = await client.query<{ metadata: { field: string; messageId: string } }>(
+          `SELECT metadata FROM audit_log
+            WHERE action = 'connection.message_masked' AND entity_id::text = $1
+            ORDER BY id DESC LIMIT 1`,
+          [conversa],
+        );
+        return { original: rows[0]!.body_original, audit: audit.rows[0]!.metadata };
+      });
+      expect(gravado.original).toBe('Me chama no 43 98010-1000 ou renata@alfa.com.br');
+      expect(gravado.audit).toEqual({ field: 'body', messageId: id });
+
+      const lidoPelaBeta = await mensagens(beta, conversa);
+      expect(lidoPelaBeta.body).not.toContain('98010-1000');
+      expect(lidoPelaBeta.body).not.toContain('renata@alfa.com.br');
+    });
+
+    it('texto que cresce com a mascara continua aceito', async () => {
+      const response = await enviar(alfa, conversa, '@abcd '.repeat(300).trim());
+      expect(response.statusCode).toBe(201);
+      expect(response.json().masked).toBe(true);
+    });
+
+    it('preserva quebra de linha, acento e emoji; so-espacos e 422', async () => {
+      const texto = 'Visita confirmada.\nAté sábado! 🙂';
+      const response = await enviar(beta, conversa, texto);
+      expect(response.statusCode).toBe(201);
+      expect(response.json().message.body).toBe(texto);
+
+      const vazio = await enviar(beta, conversa, '   ');
+      expect(vazio.statusCode).toBe(422);
+
+      const longo = await enviar(beta, conversa, 'a'.repeat(2001));
+      expect(longo.statusCode).toBe(422);
+    });
+
+    it('pedido pendente nao tem conversa (422 ao enviar, lista vazia)', async () => {
+      const envio = await enviar(alfa, pendente, 'Oi?');
+      expect(envio.statusCode).toBe(422);
+      expect(envio.json().fields).toHaveProperty('status');
+
+      const leitura = await mensagens(alfa, pendente);
+      expect(leitura.statusCode).toBe(200);
+      expect(leitura.json().items).toEqual([]);
+    });
+
+    it('conexao revogada fica so leitura', async () => {
+      const leitura = await mensagens(beta, revogada);
+      expect(leitura.statusCode).toBe(200);
+      expect(leitura.json().items.map((m: { body: string }) => m.body)).toEqual(['Mensagem antes da revogação.']);
+
+      const envio = await enviar(alfa, revogada, 'Ainda está aí?');
+      expect(envio.statusCode).toBe(422);
+    });
+
+    it('terceiro parceiro recebe 404 ao ler e ao enviar', async () => {
+      expect((await mensagens(carlos, conversa)).statusCode).toBe(404);
+      expect((await enviar(carlos, conversa, 'Oi')).statusCode).toBe(404);
+    });
+
+    it('after de outra conexao da 404', async () => {
+      const deOutra = (await mensagens(alfa, revogada)).json().items[0].id;
+      expect((await mensagens(alfa, conversa, deOutra)).statusCode).toBe(404);
+    });
+
+    it('admin da plataforma nao le a conversa', async () => {
+      const response = await mensagens(adminCookies, conversa);
+      expect(response.statusCode).toBe(401);
+      expect(response.body).not.toContain('Tenho um cliente');
+    });
+  });
+
   describe('nenhum contato atravessa', () => {
     /** GETs de conexao de um lado, sobre tudo o que a suite criou. */
     async function respostasDe(cookies: Record<string, string>): Promise<string[]> {
@@ -455,6 +609,7 @@ describe('conexoes entre parceiros', () => {
         '/connections?role=sent&limit=100',
         '/connections?role=received&limit=100',
         ...criados.map((id) => `/connections/${id}`),
+        ...criados.map((id) => `/connections/${id}/messages`),
       ];
       const bodies: string[] = [];
       for (const url of urls) {

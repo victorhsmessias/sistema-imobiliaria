@@ -1,4 +1,11 @@
-import { connectionListQuery, createConnectionInput, decideConnectionInput, revokeConnectionInput } from '@imob/contracts';
+import {
+  connectionListQuery,
+  createConnectionInput,
+  decideConnectionInput,
+  messageListQuery,
+  revokeConnectionInput,
+  sendMessageInput,
+} from '@imob/contracts';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { forbidden } from '../../lib/errors.js';
@@ -68,6 +75,26 @@ export async function connectionRoutes(app: FastifyInstance): Promise<void> {
     const { id } = parseOrThrow(idParams, request.params);
     return { connection: await service.cancel(actorOf(request), id) };
   });
+
+  app.get('/connections/:id/messages', guard, async (request) => {
+    const { id } = parseOrThrow(idParams, request.params);
+    const query = parseOrThrow(messageListQuery, request.query);
+    return service.listMessages(actorOf(request), id, query);
+  });
+
+  /**
+   * Limite proprio: conversa e uso normal, mas um script mandando mensagem
+   * sem parar entope a caixa da outra imobiliaria.
+   */
+  app.post(
+    '/connections/:id/messages',
+    { preHandler: app.requireTenant, config: { rateLimit: { max: 30, timeWindow: '1 minute' } } },
+    async (request, reply) => {
+      const { id } = parseOrThrow(idParams, request.params);
+      const input = parseOrThrow(sendMessageInput, request.body);
+      return reply.code(201).send(await service.sendMessage(actorOf(request), id, input));
+    },
+  );
 
   app.post(
     '/connections/:id/revoke',

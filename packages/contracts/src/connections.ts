@@ -69,6 +69,18 @@ export const revokeConnectionInput = z.object({
 });
 export type RevokeConnectionInput = z.infer<typeof revokeConnectionInput>;
 
+export const sendMessageInput = z.object({
+  /** Texto livre. Contato digitado e mascarado no servidor antes de gravar. */
+  body: z.string().trim().min(1).max(2000),
+});
+export type SendMessageInput = z.infer<typeof sendMessageInput>;
+
+export const messageListQuery = z.object({
+  /** Traz so as mensagens posteriores a esta. Sem ele, as 200 mais recentes. */
+  after: z.string().uuid().optional(),
+});
+export type MessageListQuery = z.infer<typeof messageListQuery>;
+
 export const connectionListQuery = z.object({
   /** `received`: pedidos sobre os meus imoveis. `sent`: os que eu fiz. */
   role: z.enum(['received', 'sent']).default('received'),
@@ -137,3 +149,17 @@ export const connectionEventDto = z.object({
   createdAt: z.string().datetime(),
 });
 export type ConnectionEventDto = z.infer<typeof connectionEventDto>;
+
+/**
+ * Mensagem da conversa.
+ *
+ * `author` diz de que lado veio, nunca quem escreveu: nome de pessoa e
+ * contato, e contato nao atravessa. A tela mostra a marca da outra parte.
+ */
+export const connectionMessageDto = z.object({
+  id: z.string().uuid(),
+  body: z.string(),
+  author: z.enum(['you', 'other']),
+  createdAt: z.string().datetime(),
+});
+export type ConnectionMessageDto = z.infer<typeof connectionMessageDto>;

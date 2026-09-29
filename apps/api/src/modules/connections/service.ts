@@ -2,11 +2,15 @@ import type {
   ConnectionDto,
   ConnectionEventDto,
   ConnectionListing,
+  ConnectionMessageDto,
   ConnectionStatus,
   CreateConnectionInput,
   DecideConnectionInput,
+  MessageListQuery,
+  SendMessageInput,
 } from '@imob/contracts';
 import { withLateTenant, withTenant, type ConnectionEvent, type ConnectionRequest, type Tx } from '@imob/db';
+import { maskContacts } from '../../lib/contact-filter.js';
 import { forbidden, notFound, validationFailed } from '../../lib/errors.js';
 import { recordAudit } from '../audit/service.js';
 import type { ActorContext } from '../properties/service.js';
@@ -312,5 +316,95 @@ export async function revoke(
     // que a plataforma ja sabe (o solicitante aparece para o dono desde o pedido).
     const ownerView: ActorContext = { ...actor, tenantId: ownerTenantId };
     return hydrate(tx, row, ownerView, await loadListing(tx, id));
+  });
+}
+
+/**
+ * Mensagens por pagina. Conversa de conexao e curta; carregar as anteriores
+ * fica para quando alguem precisar (hasMore ja avisa).
+ */
+const MESSAGE_PAGE = 200;
+
+function toMessageDto(row: repo.MessageRow, actorTenantId: string): ConnectionMessageDto {
+  return {
+    id: row.id,
+    body: row.body,
+    author: row.senderTenantId === actorTenantId ? 'you' : 'other',
+    createdAt: row.createdAt.toISOString(),
+  };
+}
+
+/**
+ * Conversa da conexao. Sem `after`, as 200 mais recentes; com `after`, as
+ * posteriores a essa mensagem (a atualizacao periodica da tela).
+ */
+export async function listMessages(
+  actor: ActorContext,
+  id: string,
+  query: MessageListQuery,
+): Promise<{ items: ConnectionMessageDto[]; hasMore: boolean }> {
+  return withTenant(actor.tenantId, async (tx) => {
+    // O RLS ja devolve zero linhas para quem nao e parte: 404, nunca 403.
+    if (!(await repo.findById(tx, id))) throw notFound('Conexão não encontrada.');
+
+    let page: repo.MessageRow[];
+    let hasMore: boolean;
+    if (query.after) {
+      if (!(await repo.findMessage(tx, id, query.after))) throw notFound('Mensagem não encontrada.');
+      const rows = await repo.messagesAfter(tx, id, query.after, MESSAGE_PAGE + 1);
+      hasMore = rows.length > MESSAGE_PAGE;
+      page = rows.slice(0, MESSAGE_PAGE);
+    } else {
+      const rows = await repo.latestMessages(tx, id, MESSAGE_PAGE + 1);
+      hasMore = rows.length > MESSAGE_PAGE;
+      page = rows.slice(0, MESSAGE_PAGE).reverse();
+    }
+
+    return { items: page.map((row) => toMessageDto(row, actor.tenantId)), hasMore };
+  });
+}
+
+/**
+ * Envia uma mensagem. So em conexao aprovada: revogada fica so leitura.
+ *
+ * O contato digitado e mascarado antes de gravar. O original fica em
+ * body_original, que a aplicacao nao consegue ler; a auditoria registra que
+ * a mascara agiu, para a plataforma achar reincidencia.
+ */
+export async function sendMessage(
+  actor: ActorContext,
+  id: string,
+  input: SendMessageInput,
+): Promise<{ message: ConnectionMessageDto; masked: boolean }> {
+  return withTenant(actor.tenantId, async (tx) => {
+    const row = await repo.findById(tx, id);
+    if (!row) throw notFound('Conexão não encontrada.');
+    if (row.status !== 'approved') {
+      throw validationFailed({ status: 'A conversa só existe em conexão aprovada.' });
+    }
+
+    const filtered = maskContacts(input.body);
+    const message = await repo.insertMessage(tx, {
+      connectionRequestId: id,
+      senderTenantId: actor.tenantId,
+      senderUserId: actor.userId,
+      body: filtered.text,
+      bodyOriginal: filtered.masked ? input.body : null,
+    });
+
+    if (filtered.masked) {
+      await recordAudit(tx, {
+        tenantId: actor.tenantId,
+        actorUserId: actor.userId,
+        action: 'connection.message_masked',
+        entityType: 'connection_request',
+        entityId: id,
+        metadata: { field: 'body', messageId: message.id },
+        ip: actor.ip,
+        userAgent: actor.userAgent,
+      });
+    }
+
+    return { message: toMessageDto(message, actor.tenantId), masked: filtered.masked };
   });
 }

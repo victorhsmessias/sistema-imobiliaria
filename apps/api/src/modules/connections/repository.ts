@@ -1,7 +1,9 @@
 import type { ConnectionStatus } from '@imob/contracts';
 import {
   and,
+  asc,
   connectionEvents,
+  connectionMessages,
   connectionRequests,
   count,
   desc,
@@ -245,4 +247,97 @@ export async function revokeApproved(
         wasApproved: row.was_approved,
       }
     : null;
+}
+
+/**
+ * Colunas da conversa que a aplicacao pode ler.
+ *
+ * `body_original` fica de fora de proposito: o app_user nao tem SELECT nela
+ * (grant por coluna em sql/10_security.sql). Um `select()` sem esta lista
+ * pediria todas as colunas e morreria com permission denied.
+ */
+const messageColumns = {
+  id: connectionMessages.id,
+  senderTenantId: connectionMessages.senderTenantId,
+  body: connectionMessages.body,
+  createdAt: connectionMessages.createdAt,
+};
+
+export interface MessageRow {
+  id: string;
+  senderTenantId: string;
+  body: string;
+  createdAt: Date;
+}
+
+export async function insertMessage(
+  tx: Tx,
+  values: {
+    connectionRequestId: string;
+    senderTenantId: string;
+    senderUserId: string;
+    body: string;
+    bodyOriginal: string | null;
+  },
+): Promise<MessageRow> {
+  const rows = await tx.insert(connectionMessages).values(values).returning(messageColumns);
+  const row = rows[0];
+  if (!row) throw new Error('insert de mensagem nao devolveu linha');
+  return row;
+}
+
+/** A mensagem, se ela for DESTA conexao. Serve de cursor para `after`. */
+export async function findMessage(
+  tx: Tx,
+  connectionRequestId: string,
+  messageId: string,
+): Promise<MessageRow | null> {
+  const rows = await tx
+    .select(messageColumns)
+    .from(connectionMessages)
+    .where(
+      and(
+        eq(connectionMessages.id, messageId),
+        eq(connectionMessages.connectionRequestId, connectionRequestId),
+      ),
+    )
+    .limit(1);
+  return rows[0] ?? null;
+}
+
+/** As mais recentes primeiro. Quem chama inverte para a ordem da conversa. */
+export async function latestMessages(tx: Tx, connectionRequestId: string, limit: number): Promise<MessageRow[]> {
+  return tx
+    .select(messageColumns)
+    .from(connectionMessages)
+    .where(eq(connectionMessages.connectionRequestId, connectionRequestId))
+    .orderBy(desc(connectionMessages.createdAt), desc(connectionMessages.id))
+    .limit(limit);
+}
+
+/**
+ * As posteriores ao cursor, em ordem crescente.
+ *
+ * A comparacao le o cursor NO BANCO: created_at tem microssegundos e o Date
+ * do JS so milissegundos. Comparar com o valor que passou pelo JS devolveria
+ * a propria mensagem do cursor em toda atualizacao.
+ */
+export async function messagesAfter(
+  tx: Tx,
+  connectionRequestId: string,
+  afterId: string,
+  limit: number,
+): Promise<MessageRow[]> {
+  return tx
+    .select(messageColumns)
+    .from(connectionMessages)
+    .where(
+      and(
+        eq(connectionMessages.connectionRequestId, connectionRequestId),
+        sql`(${connectionMessages.createdAt}, ${connectionMessages.id}) >
+            (SELECT c.created_at, c.id FROM connection_messages c WHERE c.id = ${afterId}::uuid)`,
+      ),
+    )
+    .orderBy(asc(connectionMessages.createdAt), asc(connectionMessages.id))
+    .limit(limit);
 }
