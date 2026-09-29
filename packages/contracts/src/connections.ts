@@ -7,9 +7,10 @@ import { propertyPurpose, propertyType } from './property.js';
  * O dono do imovel decide cada pedido. A plataforma nao aprova conexao a
  * conexao -- ela credencia quem entra, arbitra e pode suspender.
  *
- * Assimetria: quem pede aparece para o dono já na solicitacao; o dono so
- * aparece para quem pediu depois do aceite. Endereco exato nao e revelado em
- * nenhum momento.
+ * Cada parte ve da outra so a marca: contato de pessoa nunca atravessa, e a
+ * negociacao segue por mensagens dentro da plataforma. Quem pede aparece para
+ * o dono ja no pedido; o dono aparece para quem pediu so depois do aceite.
+ * Endereco exato nao e revelado em nenhum momento.
  */
 
 export const connectionStatus = z.enum([
@@ -21,9 +22,6 @@ export const connectionStatus = z.enum([
   'revoked',
 ]);
 export type ConnectionStatus = z.infer<typeof connectionStatus>;
-
-export const disclosureLevel = z.enum(['partner', 'partner_contact']);
-export type DisclosureLevel = z.infer<typeof disclosureLevel>;
 
 export const connectionEventType = z.enum([
   'requested',
@@ -98,19 +96,15 @@ export const connectionListing = z.object({
 });
 export type ConnectionListing = z.infer<typeof connectionListing>;
 
-/** Uma das partes. Os campos de contato dependem do nivel de disclosure. */
+/** Uma das partes: so a marca. Contato de pessoa nunca atravessa. */
 export const connectionParty = z.object({
   partnerName: z.string(),
-  brokerName: z.string().nullable(),
-  brokerPhone: z.string().nullable(),
-  brokerEmail: z.string().nullable(),
 });
 export type ConnectionParty = z.infer<typeof connectionParty>;
 
 export const connectionDto = z.object({
   id: z.string().uuid(),
   status: connectionStatus,
-  disclosureLevel,
   /** Ponto de vista de quem chamou a API. */
   role: z.enum(['requester', 'owner']),
   message: z.string().nullable(),
@@ -121,13 +115,12 @@ export const connectionDto = z.object({
 
   listing: connectionListing,
 
-  /** Só para o dono: quem está pedindo, desde o pedido. */
-  requester: connectionParty.optional(),
   /**
-   * Só para quem pediu, e só depois de aprovado. Ausente em qualquer outro
-   * estado -- e a ausência é garantida no banco, por `connection_disclosure()`.
+   * A outra parte, so pela marca. Para o dono, desde o pedido; para quem
+   * pediu, so em `approved` e `revoked`. A regra vive no banco, em
+   * `connection_requester()` e `connection_disclosure()`.
    */
-  disclosure: connectionParty.optional(),
+  counterpart: connectionParty.optional(),
 });
 export type ConnectionDto = z.infer<typeof connectionDto>;
 

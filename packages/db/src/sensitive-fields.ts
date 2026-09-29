@@ -83,15 +83,12 @@ export const OWNER_IDENTIFYING_FIELDS_OTHER: Record<string, string> = {
 };
 
 /**
- * O que uma conexao APROVADA pode revelar do dono, por nivel de disclosure.
+ * O que uma parte da conexao ve da outra: so a marca.
  *
- * Esta lista e o contrato da revelacao: a suite confere que a resposta da
- * conexao nao traz campo fora dela. Endereco exato (street, street_number,
- * zip, latitude, longitude) nao aparece em nenhum nivel -- aprovar uma conexao
- * nao e abrir o cadastro do imovel, e com o endereco o solicitante acha o
- * anuncio original num portal publico e fecha por fora.
+ * Contato de pessoa (corretor, telefone, e-mail) nunca atravessa -- a
+ * negociacao fica dentro da plataforma, por mensagens. Endereco exato tambem
+ * nunca: com ele o solicitante acha o anuncio original num portal publico e
+ * fecha por fora. A suite da API confere que `counterpart` traz exatamente
+ * estes campos.
  */
-export const DISCLOSURE_FIELDS: Record<'partner' | 'partner_contact', readonly string[]> = {
-  partner: ['partnerName'],
-  partner_contact: ['partnerName', 'brokerName', 'brokerPhone', 'brokerEmail'],
-};
+export const COUNTERPART_FIELDS = ['partnerName'] as const;

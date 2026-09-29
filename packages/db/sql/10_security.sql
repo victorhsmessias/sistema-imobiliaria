@@ -485,45 +485,43 @@ AS $$
     AND p.published_to_network;
 $$;
 
--- O que o DONO revela a quem pediu.
+-- O que o DONO revela a quem pediu: so a marca.
 --
--- As tres condicoes do WHERE sao a regra do produto, escrita no banco: a
--- conexao precisa estar APROVADA, e quem pergunta precisa ser o SOLICITANTE
--- daquela conexao. Uma consulta de qualquer outro lugar devolve zero linhas.
+-- Contato de pessoa (corretor, telefone, e-mail) nunca atravessa: a
+-- negociacao fica dentro da plataforma, por mensagens (spec de 28/09/2026).
+-- A marca aparece em conexao APROVADA e continua na REVOGADA, para a conversa
+-- so-leitura dizer com quem foi. Quem pergunta precisa ser o SOLICITANTE.
 --
 -- Nao devolve endereco: aprovar conexao nao e abrir o cadastro do imovel.
 CREATE FUNCTION connection_disclosure(p_request_id uuid)
-RETURNS TABLE (partner_name text, broker_name text, broker_phone text, broker_email text)
+RETURNS TABLE (partner_name text)
   LANGUAGE sql
   STABLE
   SECURITY DEFINER
   SET search_path = public, pg_temp
 AS $$
-  SELECT t.display_name, u.name, u.phone, u.email::text
+  SELECT t.display_name
   FROM connection_requests r
-  JOIN tenants t     ON t.id = r.owner_tenant_id
-  JOIN properties p  ON p.id = r.property_id
-  LEFT JOIN users u  ON u.id = coalesce(r.decided_by_user_id, p.created_by)
+  JOIN tenants t ON t.id = r.owner_tenant_id
   WHERE r.id = p_request_id
-    AND r.status = 'approved'
+    AND r.status IN ('approved', 'revoked')
     AND r.requester_tenant_id = app_current_tenant();
 $$;
 
--- Quem esta pedindo, para o DONO decidir.
+-- Quem esta pedindo, para o DONO decidir: so a marca.
 --
--- Disponivel desde a solicitacao, e nao apos aceite: pedir conexao e se
--- identificar. A assimetria e deliberada (ver schema/connections.ts).
+-- Disponivel desde a solicitacao: pedir conexao e se identificar como
+-- imobiliaria. Contato de pessoa nao atravessa, como no sentido contrario.
 CREATE FUNCTION connection_requester(p_request_id uuid)
-RETURNS TABLE (partner_name text, broker_name text, broker_phone text, broker_email text)
+RETURNS TABLE (partner_name text)
   LANGUAGE sql
   STABLE
   SECURITY DEFINER
   SET search_path = public, pg_temp
 AS $$
-  SELECT t.display_name, u.name, u.phone, u.email::text
+  SELECT t.display_name
   FROM connection_requests r
   JOIN tenants t ON t.id = r.requester_tenant_id
-  JOIN users u   ON u.id = r.requester_user_id
   WHERE r.id = p_request_id
     AND r.owner_tenant_id = app_current_tenant();
 $$;

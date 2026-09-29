@@ -1,4 +1,4 @@
-import { closeDb } from '@imob/db';
+import { closeDb, COUNTERPART_FIELDS } from '@imob/db';
 import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { buildApp } from '../src/app.js';
@@ -44,6 +44,12 @@ describe('conexoes entre parceiros', () => {
     return [beta.id, beta.legalName, beta.displayName, beta.slug, ...beta.emails, ...beta.names, ...beta.phones];
   }
 
+  /** Contato de pessoa de um parceiro: nunca atravessa, em nenhum estado. */
+  function contatosDe(slug: string): string[] {
+    const tenant = fixture.tenants.find((t) => t.slug === slug)!;
+    return [...tenant.emails, ...tenant.names, ...tenant.phones];
+  }
+
   beforeAll(async () => {
     app = await buildApp({ rateLimit: false });
     await app.ready();
@@ -84,9 +90,8 @@ describe('conexoes entre parceiros', () => {
       const connection = response.json().connection;
       expect(connection.status).toBe('pending');
       expect(connection.role).toBe('requester');
-      // Enquanto pende, nao ha revelacao: nem marca, nem contato.
-      expect(connection.disclosure).toBeUndefined();
-      expect(connection.requester).toBeUndefined();
+      // Enquanto pende, quem pediu nao sabe de quem e o imovel.
+      expect(connection.counterpart).toBeUndefined();
       // O imovel aparece com os mesmos campos da busca, sem endereco.
       expect(connection.listing.neighborhoodName).toBeTruthy();
       expect(JSON.stringify(connection.listing)).not.toMatch(/street|zip|latitude/i);
@@ -135,7 +140,7 @@ describe('conexoes entre parceiros', () => {
   });
 
   describe('caixa de cada lado', () => {
-    it('o dono ve quem pediu, com contato: pedir e se identificar', async () => {
+    it('o dono ve so a marca de quem pediu, sem contato', async () => {
       const response = await app.inject({
         method: 'GET',
         url: '/connections?role=received',
@@ -145,11 +150,10 @@ describe('conexoes entre parceiros', () => {
 
       const item = response.json().items.find((i: { id: string }) => i.id === criados[0]);
       expect(item.role).toBe('owner');
-      expect(item.requester.partnerName).toBe('Alfa Imóveis');
-      expect(item.requester.brokerName).toBeTruthy();
-      expect(item.requester.brokerEmail).toBe(ALFA);
+      expect(item.counterpart).toEqual({ partnerName: 'Alfa Imóveis' });
+      expect(Object.keys(item.counterpart)).toEqual([...COUNTERPART_FIELDS]);
       expect(item.message).toMatch(/cliente/i);
-      expect(item.disclosure).toBeUndefined();
+      expect(contatosDe('alfa-imoveis').filter((v) => response.body.includes(v))).toEqual([]);
     });
 
     it('quem pediu nao ve o dono enquanto o pedido pende', async () => {
@@ -157,7 +161,7 @@ describe('conexoes entre parceiros', () => {
       const item = response.json().items.find((i: { id: string }) => i.id === criados[0]);
 
       expect(item.status).toBe('pending');
-      expect(item.disclosure).toBeUndefined();
+      expect(item.counterpart).toBeUndefined();
       expect(identificadoresDaBeta().filter((v) => response.body.includes(v))).toEqual([]);
     });
 
@@ -188,7 +192,7 @@ describe('conexoes entre parceiros', () => {
       expect(cancelar.statusCode).toBe(403);
     });
 
-    it('o dono aprova e so entao o contato dele aparece', async () => {
+    it('o dono aprova e so entao a marca dele aparece, nunca o contato', async () => {
       const aprovado = await app.inject({
         method: 'POST',
         url: `/connections/${criados[0]}/approve`,
@@ -205,9 +209,8 @@ describe('conexoes entre parceiros', () => {
       const { connection, events } = visao.json();
 
       expect(connection.status).toBe('approved');
-      expect(connection.disclosure.partnerName).toBe('Beta Imóveis');
-      expect(connection.disclosure.brokerEmail).toBe(BETA);
-      expect(connection.disclosure.brokerPhone).toBeTruthy();
+      expect(connection.counterpart).toEqual({ partnerName: 'Beta Imóveis' });
+      expect(contatosDe('beta-imoveis').filter((v) => visao.body.includes(v))).toEqual([]);
 
       // Mesmo aprovado, endereco nao: com ele o solicitante acha o anuncio
       // original num portal e fecha por fora.
@@ -222,32 +225,20 @@ describe('conexoes entre parceiros', () => {
         expect(visao.body.includes(valor), `"${valor}" vazou na conexão aprovada`).toBe(false);
       }
 
-      // A trilha diz de que lado veio cada ato, nunca quem e. O terceiro
-      // evento e esta propria leitura: abrir os dados revelados fica
-      // registrado, e e o que sustenta uma disputa de comissao depois.
+      // Abrir o detalhe nao grava mais evento: nao ha contato a "revelar".
       expect(events.map((e: { type: string; actor: string }) => [e.type, e.actor])).toEqual([
         ['requested', 'you'],
         ['approved', 'other'],
-        ['disclosed', 'you'],
       ]);
     });
 
-    it('nivel de disclosure "partner" mostra a marca e esconde o contato', async () => {
-      const response = await pedir(betaListings[1]!);
-      const id = response.json().connection.id;
+    it('a lista de quem pediu traz a marca do dono depois do aceite', async () => {
+      const response = await app.inject({ method: 'GET', url: '/connections?role=sent', cookies: alfa });
+      const item = response.json().items.find((i: { id: string }) => i.id === criados[0]);
 
-      await withOracle((client) =>
-        client.query(`UPDATE connection_requests SET disclosure_level = 'partner' WHERE id = $1`, [id]),
-      );
-      await app.inject({ method: 'POST', url: `/connections/${id}/approve`, cookies: beta });
-
-      const visao = await app.inject({ method: 'GET', url: `/connections/${id}`, cookies: alfa });
-      const disclosure = visao.json().connection.disclosure;
-
-      expect(disclosure.partnerName).toBe('Beta Imóveis');
-      expect(disclosure.brokerName).toBeNull();
-      expect(disclosure.brokerPhone).toBeNull();
-      expect(disclosure.brokerEmail).toBeNull();
+      expect(item.status).toBe('approved');
+      expect(item.counterpart).toEqual({ partnerName: 'Beta Imóveis' });
+      expect(contatosDe('beta-imoveis').filter((v) => response.body.includes(v))).toEqual([]);
     });
 
     it('recusa com motivo, sem revelar o dono', async () => {
@@ -265,7 +256,7 @@ describe('conexoes entre parceiros', () => {
       const visao = await app.inject({ method: 'GET', url: `/connections/${id}`, cookies: alfa });
       expect(visao.json().connection.status).toBe('rejected');
       expect(visao.json().connection.decisionNote).toMatch(/negociação/i);
-      expect(visao.json().connection.disclosure).toBeUndefined();
+      expect(visao.json().connection.counterpart).toBeUndefined();
       expect(identificadoresDaBeta().filter((v) => visao.body.includes(v))).toEqual([]);
     });
 
@@ -439,26 +430,10 @@ describe('conexoes entre parceiros', () => {
       expect(revokedEvent!.actor).toBe('platform'); // Nenhum tenant, é a plataforma
     });
 
-    it('parceiro perde acesso apos revogacao (disclosure se vai)', async () => {
+    it('depois da revogacao, quem pediu continua vendo so a marca', async () => {
       const response = await pedir(betaListings[9]!);
       const id = response.json().connection.id;
-
-      // Alfa pede, Beta aprova
-      await app.inject({
-        method: 'POST',
-        url: `/connections/${id}/approve`,
-        cookies: beta,
-      });
-
-      // Alfa ve o disclosure (contato da Beta)
-      let visao = await app.inject({
-        method: 'GET',
-        url: `/connections/${id}`,
-        cookies: alfa,
-      });
-      expect(visao.json().connection.disclosure).toBeDefined();
-
-      // Revoga
+      await app.inject({ method: 'POST', url: `/connections/${id}/approve`, cookies: beta });
       await app.inject({
         method: 'POST',
         url: `/connections/${id}/revoke`,
@@ -466,14 +441,39 @@ describe('conexoes entre parceiros', () => {
         payload: { reason: 'Abuso comprovado' },
       });
 
-      // Alfa nao consegue mais ver o disclosure
-      visao = await app.inject({
-        method: 'GET',
-        url: `/connections/${id}`,
-        cookies: alfa,
-      });
-      expect(visao.json().connection.disclosure).toBeUndefined();
+      const visao = await app.inject({ method: 'GET', url: `/connections/${id}`, cookies: alfa });
       expect(visao.json().connection.status).toBe('revoked');
+      expect(visao.json().connection.counterpart).toEqual({ partnerName: 'Beta Imóveis' });
+      expect(contatosDe('beta-imoveis').filter((v) => visao.body.includes(v))).toEqual([]);
+    });
+  });
+
+  describe('nenhum contato atravessa', () => {
+    /** GETs de conexao de um lado, sobre tudo o que a suite criou. */
+    async function respostasDe(cookies: Record<string, string>): Promise<string[]> {
+      const urls = [
+        '/connections?role=sent&limit=100',
+        '/connections?role=received&limit=100',
+        ...criados.map((id) => `/connections/${id}`),
+      ];
+      const bodies: string[] = [];
+      for (const url of urls) {
+        const response = await app.inject({ method: 'GET', url, cookies });
+        bodies.push(response.body);
+      }
+      return bodies;
+    }
+
+    it('a Alfa nunca recebe contato da Beta, e a Beta nunca recebe o da Alfa', async () => {
+      const daBeta = contatosDe('beta-imoveis');
+      const daAlfa = contatosDe('alfa-imoveis');
+
+      for (const body of await respostasDe(alfa)) {
+        expect(daBeta.filter((v) => body.includes(v))).toEqual([]);
+      }
+      for (const body of await respostasDe(beta)) {
+        expect(daAlfa.filter((v) => body.includes(v))).toEqual([]);
+      }
     });
   });
 });

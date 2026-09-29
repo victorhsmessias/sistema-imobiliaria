@@ -135,20 +135,6 @@ export async function listEvents(tx: Tx, connectionRequestId: string) {
     .orderBy(connectionEvents.createdAt);
 }
 
-export async function hasDisclosureEvent(tx: Tx, connectionRequestId: string): Promise<boolean> {
-  const rows = await tx
-    .select({ id: connectionEvents.id })
-    .from(connectionEvents)
-    .where(
-      and(
-        eq(connectionEvents.connectionRequestId, connectionRequestId),
-        eq(connectionEvents.type, 'disclosed'),
-      ),
-    )
-    .limit(1);
-  return rows.length > 0;
-}
-
 export interface ListingRow {
   listing_id: string;
   type: string;
@@ -184,22 +170,19 @@ export async function listingsOf(tx: Tx, requestIds: string[]): Promise<Map<stri
 
 export interface PartyRow {
   partner_name: string;
-  broker_name: string | null;
-  broker_phone: string | null;
-  broker_email: string | null;
 }
 
-/** Quem pediu, para o dono. Devolve vazio se quem pergunta nao e o dono. */
+/** Marca de quem pediu, para o dono. Vazio se quem pergunta nao e o dono. */
 export async function requesterOf(tx: Tx, requestId: string): Promise<PartyRow | null> {
   const { rows } = await tx.execute(sql`SELECT * FROM connection_requester(${requestId}::uuid)`);
   return (rows[0] as PartyRow | undefined) ?? null;
 }
 
 /**
- * Dados do dono, para quem pediu.
+ * Marca do dono, para quem pediu.
  *
- * Devolve vazio se a conexao nao esta aprovada ou se quem pergunta nao e o
- * solicitante -- a regra vive na funcao, no banco.
+ * Vazio se a conexao nao esta aprovada nem revogada, ou se quem pergunta nao
+ * e o solicitante -- a regra vive na funcao, no banco.
  */
 export async function disclosureOf(tx: Tx, requestId: string): Promise<PartyRow | null> {
   const { rows } = await tx.execute(sql`SELECT * FROM connection_disclosure(${requestId}::uuid)`);

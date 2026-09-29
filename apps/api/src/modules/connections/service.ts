@@ -2,7 +2,6 @@ import type {
   ConnectionDto,
   ConnectionEventDto,
   ConnectionListing,
-  ConnectionParty,
   ConnectionStatus,
   CreateConnectionInput,
   DecideConnectionInput,
@@ -21,11 +20,9 @@ import * as repo from './repository.js';
  * a partir da pesquisa de mercado: e o que tem precedente (Homer, ImovelPro,
  * Casafari Connect) e o que menos trava a liquidez da rede.
  *
- * O que cada lado enxerga:
- *  - o dono ve quem pediu desde o pedido (pedir e se identificar);
- *  - quem pediu so ve o dono depois do aceite, e nunca o endereco.
- * As duas regras estao nas funcoes SECURITY DEFINER, nao aqui: o service
- * apenas escolhe quais campos mostrar dentro do que o banco liberou.
+ * O que cada lado enxerga da outra parte: so a marca. O dono ve quem pediu
+ * desde o pedido; quem pediu ve o dono so depois do aceite. Contato de pessoa
+ * nunca atravessa -- a negociacao segue pelas mensagens da conexao.
  */
 
 /** Prazo do pedido pendente. Sem prazo, a caixa do dono vira cemiterio. */
@@ -50,24 +47,6 @@ function toListing(row: repo.ListingRow): ConnectionListing {
     areaTotal: num(row.area_total),
     salePriceCents: num(row.sale_price_cents),
     rentPriceCents: num(row.rent_price_cents),
-  };
-}
-
-/**
- * Aplica o nivel de disclosure.
- *
- * `partner` mostra so a marca; `partner_contact` mostra tambem o corretor.
- * Cortar aqui, e nao na consulta, mantem um lugar unico para a politica.
- */
-function toParty(row: repo.PartyRow, level: 'partner' | 'partner_contact'): ConnectionParty {
-  if (level === 'partner') {
-    return { partnerName: row.partner_name, brokerName: null, brokerPhone: null, brokerEmail: null };
-  }
-  return {
-    partnerName: row.partner_name,
-    brokerName: row.broker_name,
-    brokerPhone: row.broker_phone,
-    brokerEmail: row.broker_email,
   };
 }
 
@@ -96,7 +75,6 @@ async function hydrate(
   const dto: ConnectionDto = {
     id: row.id,
     status: row.status,
-    disclosureLevel: row.disclosureLevel,
     role,
     message: row.message,
     decisionNote: row.decisionNote,
@@ -106,15 +84,12 @@ async function hydrate(
     listing: toListing(listing),
   };
 
-  if (role === 'owner') {
-    const requester = await repo.requesterOf(tx, row.id);
-    if (requester) dto.requester = toParty(requester, 'partner_contact');
-    return dto;
-  }
+  // A funcao do banco decide se a marca aparece: para o dono, sempre; para
+  // quem pediu, so em approved/revoked. Aqui so se copia o que ela liberou.
+  const party =
+    role === 'owner' ? await repo.requesterOf(tx, row.id) : await repo.disclosureOf(tx, row.id);
+  if (party) dto.counterpart = { partnerName: party.partner_name };
 
-  // Solicitante: so revela contato do dono DEPOIS de abrir (evento disclosed).
-  // Na listagem ou em outros contextos, nao mostra -- precisa entrar em detalhe.
-  // O disclosure sera adicionado por quem chama hydrate() se apropriado.
   return dto;
 }
 
@@ -217,27 +192,6 @@ export async function getById(
     if (!row) throw notFound('Conexão não encontrada.');
 
     const connection = await hydrate(tx, row, actor, await loadListing(tx, row.id));
-
-    const isRequester = row.requesterTenantId === actor.tenantId;
-    const isApproved = row.status === 'approved';
-
-    // Solicitante abrindo conexao aprovada pela primeira vez: registra evento
-    // disclosed e depois revela contato do dono. O evento e prova de que viu.
-    if (isRequester && isApproved && !(await repo.hasDisclosureEvent(tx, row.id))) {
-      await repo.insertEvent(tx, {
-        connectionRequestId: row.id,
-        type: 'disclosed',
-        actorTenantId: actor.tenantId,
-        actorUserId: actor.userId,
-      });
-    }
-
-    // Depois de criar evento, carrega o disclosure e adiciona ao DTO.
-    if (isRequester && isApproved && (await repo.hasDisclosureEvent(tx, row.id))) {
-      const disclosure = await repo.disclosureOf(tx, row.id);
-      if (disclosure) connection.disclosure = toParty(disclosure, row.disclosureLevel);
-    }
-
     const events = await repo.listEvents(tx, row.id);
     return { connection, events: events.map((event) => toEventDto(event, actor.tenantId)) };
   });

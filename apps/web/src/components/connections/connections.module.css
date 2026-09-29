@@ -65,40 +65,22 @@
   color: var(--ink-2);
 }
 
-/* Dados de uma das partes. */
-.party {
+/* A outra parte, so pela marca. */
+.counterpart {
   display: flex;
-  flex-wrap: wrap;
-  gap: 8px 24px;
-  margin: 4px 0 0;
-  padding: 12px 14px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-s);
+  align-items: baseline;
+  gap: 8px;
+  margin: 0;
+  font-size: 13.5px;
+  font-weight: 600;
 }
 
-/* O que só apareceu depois do aceite merece destaque: é o ponto do produto. */
-.revealed {
-  border-color: var(--ok);
-  background: var(--ok-soft);
-}
-
-.party div {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.party dt {
+.counterpartLabel {
   font-size: 11.5px;
+  font-weight: 500;
   text-transform: uppercase;
   letter-spacing: 0.04em;
   color: var(--ink-3);
-}
-
-.party dd {
-  margin: 0;
-  font-size: 13.5px;
-  font-weight: 500;
 }
 
 .foot {

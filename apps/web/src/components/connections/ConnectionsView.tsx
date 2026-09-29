@@ -84,7 +84,7 @@ export function ConnectionsView() {
       <header className={styles.head}>
         <h1 className="page-title">Conexões</h1>
         <p className="lead">
-          Quem anuncia decide cada pedido. O contato só aparece depois do aceite.
+          Quem anuncia decide cada pedido. Depois do aceite, a conversa acontece aqui.
         </p>
       </header>
 
@@ -161,60 +161,14 @@ export function ConnectionsView() {
                 </p>
               )}
 
-              {/* Dono: quem está pedindo, desde o pedido. */}
-              {connection.requester && (
-                <dl className={styles.party}>
-                  <div>
-                    <dt>Parceiro</dt>
-                    <dd>{connection.requester.partnerName}</dd>
-                  </div>
-                  {connection.requester.brokerName && (
-                    <div>
-                      <dt>Corretor</dt>
-                      <dd>{connection.requester.brokerName}</dd>
-                    </div>
-                  )}
-                  {connection.requester.brokerPhone && (
-                    <div>
-                      <dt>Telefone</dt>
-                      <dd className="num">{connection.requester.brokerPhone}</dd>
-                    </div>
-                  )}
-                  {connection.requester.brokerEmail && (
-                    <div>
-                      <dt>E-mail</dt>
-                      <dd>{connection.requester.brokerEmail}</dd>
-                    </div>
-                  )}
-                </dl>
-              )}
-
-              {/* Solicitante: só existe depois do aceite. */}
-              {connection.disclosure && (
-                <dl className={`${styles.party} ${styles.revealed}`}>
-                  <div>
-                    <dt>Imobiliária</dt>
-                    <dd>{connection.disclosure.partnerName}</dd>
-                  </div>
-                  {connection.disclosure.brokerName && (
-                    <div>
-                      <dt>Corretor</dt>
-                      <dd>{connection.disclosure.brokerName}</dd>
-                    </div>
-                  )}
-                  {connection.disclosure.brokerPhone && (
-                    <div>
-                      <dt>Telefone</dt>
-                      <dd className="num">{connection.disclosure.brokerPhone}</dd>
-                    </div>
-                  )}
-                  {connection.disclosure.brokerEmail && (
-                    <div>
-                      <dt>E-mail</dt>
-                      <dd>{connection.disclosure.brokerEmail}</dd>
-                    </div>
-                  )}
-                </dl>
+              {/* A outra parte, so pela marca: contato nunca atravessa. */}
+              {connection.counterpart && (
+                <p className={styles.counterpart}>
+                  <span className={styles.counterpartLabel}>
+                    {connection.role === 'owner' ? 'Quem pediu' : 'Quem anuncia'}
+                  </span>
+                  {connection.counterpart.partnerName}
+                </p>
               )}
 
               <div className={styles.foot}>

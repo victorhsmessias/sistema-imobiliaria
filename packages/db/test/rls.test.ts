@@ -244,6 +244,59 @@ describe('isolamento por tenant (RLS)', () => {
       });
     }
 
+    async function removerPedido(id: string): Promise<void> {
+      await withOracle((oracle) => oracle.query('DELETE FROM connection_requests WHERE id = $1', [id]));
+    }
+
+    async function mudarStatus(id: string, status: string): Promise<void> {
+      await withOracle((oracle) =>
+        oracle.query('UPDATE connection_requests SET status = $2::connection_status WHERE id = $1', [id, status]),
+      );
+    }
+
+    it('as funcoes de revelacao devolvem so a marca, nunca contato', async () => {
+      const id = await criarPedido();
+      try {
+        await mudarStatus(id, 'approved');
+
+        const paraODono = await asTenant(client, beta.id, () =>
+          client.query('SELECT * FROM connection_requester($1)', [id]),
+        );
+        expect(paraODono.fields.map((f) => f.name)).toEqual(['partner_name']);
+        expect(paraODono.rows).toEqual([{ partner_name: alfa.displayName }]);
+
+        const paraQuemPediu = await asTenant(client, alfa.id, () =>
+          client.query('SELECT * FROM connection_disclosure($1)', [id]),
+        );
+        expect(paraQuemPediu.fields.map((f) => f.name)).toEqual(['partner_name']);
+        expect(paraQuemPediu.rows).toEqual([{ partner_name: beta.displayName }]);
+      } finally {
+        await removerPedido(id);
+      }
+    });
+
+    it('a marca do dono vale em aprovada e revogada, e em mais nenhum status', async () => {
+      const id = await criarPedido();
+      try {
+        for (const [status, esperado] of [
+          ['pending', 0],
+          ['approved', 1],
+          ['revoked', 1],
+          ['rejected', 0],
+          ['expired', 0],
+          ['cancelled', 0],
+        ] as const) {
+          await mudarStatus(id, status);
+          const { rows } = await asTenant(client, alfa.id, () =>
+            client.query('SELECT * FROM connection_disclosure($1)', [id]),
+          );
+          expect(rows, `status ${status}`).toHaveLength(esperado);
+        }
+      } finally {
+        await removerPedido(id);
+      }
+    });
+
     it('fail-closed: sem tenant no contexto, nao ha conexao nem trilha', async () => {
       for (const table of ['connection_requests', 'connection_events']) {
         const { rows } = await client.query<{ count: string }>(
