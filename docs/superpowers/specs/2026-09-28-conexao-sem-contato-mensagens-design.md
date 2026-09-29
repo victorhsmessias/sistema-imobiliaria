@@ -101,6 +101,10 @@ Cria as duas tabelas, troca as duas funções, ajusta grants. Sem backfill, ent�
 | `POST /connections/:id/messages` | 201 `{ message, masked }` | 404; 422 fora de `approved` ou texto vazio |
 | `POST /connections/:id/read` | 204 | 404 |
 
+- **"Sem efeito colateral" em `GET /connections/:id`** quer dizer que abrir o detalhe não
+  grava mais o evento `disclosed`. A única exceção pré-existente é a varredura de expiração
+  (`sweepExpired`), que continua marcando como `expired` um pedido pendente vencido durante a
+  própria leitura.
 - Terceiro recebe 404 (o RLS devolve zero linhas), como hoje.
 - `POST /messages` com rate limit próprio de 30/min.
 - `unreadCount` = mensagens da outra parte com `created_at > last_read_at` (ou todas, sem

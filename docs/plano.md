@@ -34,7 +34,7 @@ Um parceiro já consegue, hoje:
 4. **Pedir conexão** num imóvel de outro parceiro. O dono vê quem pediu e decide; depois do
    aceite, as duas imobiliárias conversam pelo sistema, sem trocar contato — e o endereço, nunca.
 
-O que sustenta essa afirmação: **201 testes** (31 no banco, 170 na API), typecheck limpo nos
+O que sustenta essa afirmação: **269 testes** (39 no banco, 230 na API), typecheck limpo nos
 quatro pacotes, e as imagens de produção construindo e subindo (API respondendo `/health`, web
 servindo `/login`). Detalhe por tarefa nas tabelas de status abaixo.
 
@@ -153,8 +153,8 @@ Atualizado em 16/09/2026. Verificado com migrate → seed → todas as suítes, 
 | 5 | **Fluxo de conexão**: pedir, aprovar, recusar, cancelar, expirar, revelação controlada + tela; conversa pelo sistema (28/09) | **pronto** — falta notificação por e-mail |
 | 3b | **Tela de importação e curadoria**: cadastrar feed, simular, ver o diff, ligar grafia a bairro | **pronto** (16/09/2026) |
 
-**201 testes verdes**: 31 no banco (isolamento, anonimização, RLS da importação e das conexões) e
-170 na API (auth, carteira, busca, mídia, importação, parser VrSync, SSRF, conexões e curadoria).
+**269 testes verdes**: 39 no banco (isolamento, anonimização, RLS da importação e das conexões) e
+230 na API (auth, carteira, busca, mídia, importação, parser VrSync, SSRF, conexões e curadoria).
 
 ### Decisões do cliente registradas (12/09/2026)
 
@@ -531,8 +531,8 @@ do Casafari e do Top Agent Network não foram verificadas.
 
 ```bash
 pnpm db:migrate && pnpm db:seed
-pnpm test:rls     # 31 testes: isolamento, anonimização, RLS da importação e das conexões
-pnpm test:api     # 170 testes: auth, carteira, busca, mídia, importação, parser, SSRF, conexões, curadoria
+pnpm test:rls     # 39 testes: isolamento, anonimização, RLS da importação e das conexões
+pnpm test:api     # 230 testes: auth, carteira, busca, mídia, importação, parser, SSRF, conexões, curadoria
 ```
 
 **Fim a fim, manual**

@@ -22,6 +22,10 @@ describe('maskContacts', () => {
     ['site https://beta.com.br/x', `site ${CONTACT_MASK}`],
     ['wa.me/5543980202000', CONTACT_MASK],
     ['insta @betaimoveis', `insta ${CONTACT_MASK}`],
+    ['43 9 8020 2000', CONTACT_MASK],
+    ['43 9.8020.2000', CONTACT_MASK],
+    ['(43) 9 8020-2000', CONTACT_MASK],
+    ['ligue 9 8020-2000', `ligue ${CONTACT_MASK}`],
   ])('mascara %j', (input, expected) => {
     expect(maskContacts(input)).toEqual({ text: expected, masked: true });
   });

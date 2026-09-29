@@ -18,7 +18,7 @@ Funciona de ponta a ponta em ambiente local; falta colocar no ar.
 - **Pronto:** carteira com fotos, importação VrSync (arquivo ou URL, com simulação e curadoria
   de bairros), busca anônima por bairro, e o fluxo de conexão — o dono aprova, e só então o
   contato dele aparece.
-- **Verificado:** 201 testes (31 no banco, 170 na API), typecheck limpo, imagens de produção
+- **Verificado:** 269 testes (39 no banco, 230 na API), typecheck limpo, imagens de produção
   construindo e subindo. **As telas nunca foram abertas num navegador.**
 - **Falta para o uso diário:** executar o deploy, fila para a importação (hoje ela roda dentro
   do processo da API, que fica limitada a uma réplica) e notificação por e-mail das conexões.
@@ -67,7 +67,7 @@ pnpm install
 pnpm dev:infra      # Postgres (5434) + MinIO (9000/9001)
 pnpm db:migrate     # migrations + RLS + views + funções
 pnpm db:seed        # 3 parceiros, 60 imóveis, bairros de Londrina
-pnpm test           # 201 testes: isolamento, anonimização, auth, carteira, busca, mídia, importação, conexões e curadoria
+pnpm test           # 269 testes: isolamento, anonimização, auth, carteira, busca, mídia, importação, conexões e curadoria
 
 pnpm dev:api        # API em http://localhost:3333
 pnpm dev:web        # Telas em http://localhost:3100
@@ -186,8 +186,8 @@ docs/           plano, deploy, notas de anonimização
 | `pnpm dev:api` | Sobe a API em modo watch |
 | `pnpm dev:web` | Sobe as telas em modo watch (porta 3100) |
 | `pnpm test` | Todas as suítes |
-| `pnpm test:rls` | Isolamento, anonimização e RLS de importação e conexões (31 testes) |
-| `pnpm test:api` | Auth, carteira, busca, mídia, importação, parser, SSRF, conexões e curadoria (170 testes) |
+| `pnpm test:rls` | Isolamento, anonimização e RLS de importação e conexões (39 testes) |
+| `pnpm test:api` | Auth, carteira, busca, mídia, importação, parser, SSRF, conexões e curadoria (230 testes) |
 | `pnpm catalog:export` | Exporta o catálogo de bairros para CSV (revisão em planilha) |
 | `pnpm catalog:import` | Aplica o CSV revisado (dry-run; `--apply` grava) |
 

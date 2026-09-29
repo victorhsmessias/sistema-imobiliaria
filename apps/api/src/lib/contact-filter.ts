@@ -25,9 +25,11 @@ const PATTERNS: readonly RegExp[] = [
   // @perfil de rede social
   /(?<![\p{L}\d._])@[\p{L}\d._]{3,30}/giu,
   // telefone com DDD (10 ou 11 digitos, +55 opcional). Nao pega valor apos R$.
-  /(?<!R\$\s*)(?<![\d.,])(?:\+?55[\s.-]*)?\(?\d{2}\)?[\s.-]*9?\d{4}[\s.-]?\d{4}(?![\d.,]?\d)/gu,
+  // O 9 do celular pode vir separado do resto ("43 9 8020-2000"), por isso o
+  // grupo carrega seu proprio separador opcional em vez de "9?" solto.
+  /(?<!R\$\s*)(?<![\d.,])(?:\+?55[\s.-]*)?\(?\d{2}\)?[\s.-]*(?:9[\s.-]?)?\d{4}[\s.-]?\d{4}(?![\d.,]?\d)/gu,
   // telefone sem DDD: exige o traco, para nao pegar codigo de referencia
-  /(?<!R\$\s*)(?<![\d.,])9?\d{4}-\d{4}(?![\d.,]?\d)/gu,
+  /(?<!R\$\s*)(?<![\d.,])(?:9[\s.-]?)?\d{4}-\d{4}(?![\d.,]?\d)/gu,
 ];
 
 export function maskContacts(text: string): { text: string; masked: boolean } {

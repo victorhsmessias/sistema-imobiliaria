@@ -106,8 +106,8 @@ dono (a view não tem `tenant_id`); o valor só carimba a linha.
 
 ```bash
 pnpm db:migrate && pnpm db:seed
-pnpm test:rls    # 31 testes: isolamento e anonimização, contra Postgres real
-pnpm test:api    # 170 testes
+pnpm test:rls    # 39 testes: isolamento e anonimização, contra Postgres real
+pnpm test:api    # 230 testes
 pnpm typecheck
 ```
 
