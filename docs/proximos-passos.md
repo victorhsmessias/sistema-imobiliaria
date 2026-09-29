@@ -61,9 +61,16 @@ Isso muda a regra "aprovar é que revela o dono" do [`plano.md`](plano.md) (tabe
 o quê" e a função `connection_disclosure`).
 
 **Implementado na branch `feat/conexao-mensagens`**, com testes (suíte do banco: 39 testes;
-suíte da API: 226 testes; typecheck limpo nos quatro pacotes). Falta o deploy, que depende de
-aprovação explícita: aplicar a migration `0005_connection_messages` e o `10_security.sql`
-novo, e subir `api` e `web`.
+suíte da API: 230 testes; typecheck limpo nos quatro pacotes). Validado no navegador em
+ambiente local em 29/09: pedido e aceite mostram só a marca (tela e JSON cru), conversa com
+máscara de telefone, não lidas no cartão e no menu, revogação só leitura nos dois lados. A
+validação achou e corrigiu uma corrida em que o envio escondia a mensagem recém-chegada da
+outra parte. Falta o deploy, que depende de aprovação explícita: aplicar a migration
+`0005_connection_messages` e o `10_security.sql` novo, e subir `api` e `web`.
+
+**Antes do deploy:** recados e notas de recusa gravados antes desta mudança não passaram
+pelo filtro. Contar em produção quantos `message`/`decision_note` têm telefone, e-mail ou
+link; se houver parceiro real afetado, mascarar também na leitura.
 
 Ficou fora desta spec:
 - notificação por e-mail da conversa;
