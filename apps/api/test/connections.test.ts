@@ -162,7 +162,10 @@ describe('conexoes entre parceiros', () => {
 
       expect(item.status).toBe('pending');
       expect(item.counterpart).toBeUndefined();
-      expect(identificadoresDaBeta().filter((v) => response.body.includes(v))).toEqual([]);
+      // So o item deste pedido: outra conexao Alfa->Beta ja aprovada no banco
+      // mostra a marca da Beta legitimamente, e nao pode reprovar este teste.
+      const doItem = JSON.stringify(item);
+      expect(identificadoresDaBeta().filter((v) => doItem.includes(v))).toEqual([]);
     });
 
     it('um terceiro parceiro nao enxerga a conexao dos outros', async () => {
