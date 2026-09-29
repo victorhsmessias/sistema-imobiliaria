@@ -73,6 +73,7 @@ async function hydrate(
   row: ConnectionRequest,
   actor: ActorContext,
   listing: repo.ListingRow,
+  unreadCount: number,
 ): Promise<ConnectionDto> {
   const role = row.ownerTenantId === actor.tenantId ? 'owner' : 'requester';
 
@@ -86,6 +87,7 @@ async function hydrate(
     decidedAt: row.decidedAt?.toISOString() ?? null,
     expiresAt: row.expiresAt.toISOString(),
     listing: toListing(listing),
+    unreadCount,
   };
 
   // A funcao do banco decide se a marca aparece: para o dono, sempre; para
@@ -158,7 +160,7 @@ export async function request(
       userAgent: actor.userAgent,
     });
 
-    return hydrate(tx, row, actor, await loadListing(tx, row.id));
+    return hydrate(tx, row, actor, await loadListing(tx, row.id), 0);
   });
 }
 
@@ -174,11 +176,12 @@ export async function list(
       tx,
       rows.map((row) => row.id),
     );
+    const unread = await repo.unreadCounts(tx, actor.tenantId, rows.map((row) => row.id));
 
     const items: ConnectionDto[] = [];
     for (const row of rows) {
       const listing = listings.get(row.id);
-      if (listing) items.push(await hydrate(tx, row, actor, listing));
+      if (listing) items.push(await hydrate(tx, row, actor, listing, unread.get(row.id) ?? 0));
     }
     return { items, total };
   });
@@ -195,7 +198,8 @@ export async function getById(
     // O RLS ja devolve zero linhas para quem nao e parte: 404, nunca 403.
     if (!row) throw notFound('Conexão não encontrada.');
 
-    const connection = await hydrate(tx, row, actor, await loadListing(tx, row.id));
+    const unread = await repo.unreadCounts(tx, actor.tenantId, [row.id]);
+    const connection = await hydrate(tx, row, actor, await loadListing(tx, row.id), unread.get(row.id) ?? 0);
     const events = await repo.listEvents(tx, row.id);
     return { connection, events: events.map((event) => toEventDto(event, actor.tenantId)) };
   });
@@ -251,7 +255,7 @@ async function transition(
       userAgent: actor.userAgent,
     });
 
-    return hydrate(tx, updated, actor, await loadListing(tx, id));
+    return hydrate(tx, updated, actor, await loadListing(tx, id), 0);
   });
 }
 
@@ -315,7 +319,8 @@ export async function revoke(
     // A resposta sai na visao do dono: e a unica que nao revela nada alem do
     // que a plataforma ja sabe (o solicitante aparece para o dono desde o pedido).
     const ownerView: ActorContext = { ...actor, tenantId: ownerTenantId };
-    return hydrate(tx, row, ownerView, await loadListing(tx, id));
+    const unread = await repo.unreadCounts(tx, ownerTenantId, [id]);
+    return hydrate(tx, row, ownerView, await loadListing(tx, id), unread.get(id) ?? 0);
   });
 }
 
@@ -406,5 +411,13 @@ export async function sendMessage(
     }
 
     return { message: toMessageDto(message, actor.tenantId), masked: filtered.masked };
+  });
+}
+
+/** Marca a conversa como lida ate agora, pelo lado de quem chamou. */
+export async function markRead(actor: ActorContext, id: string): Promise<void> {
+  await withTenant(actor.tenantId, async (tx) => {
+    if (!(await repo.findById(tx, id))) throw notFound('Conexão não encontrada.');
+    await repo.markRead(tx, id, actor.tenantId);
   });
 }

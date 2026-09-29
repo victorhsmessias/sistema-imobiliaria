@@ -3,6 +3,7 @@ import {
   and,
   asc,
   connectionEvents,
+  connectionMessageReads,
   connectionMessages,
   connectionRequests,
   count,
@@ -340,4 +341,43 @@ export async function messagesAfter(
     )
     .orderBy(asc(connectionMessages.createdAt), asc(connectionMessages.id))
     .limit(limit);
+}
+
+/** Marca a conversa como lida ate agora, pelo lado deste parceiro. */
+export async function markRead(tx: Tx, connectionRequestId: string, tenantId: string): Promise<void> {
+  await tx
+    .insert(connectionMessageReads)
+    .values({ connectionRequestId, tenantId, lastReadAt: sql`now()` })
+    .onConflictDoUpdate({
+      target: [connectionMessageReads.connectionRequestId, connectionMessageReads.tenantId],
+      set: { lastReadAt: sql`now()` },
+    });
+}
+
+/**
+ * Nao lidas por conexao, numa consulta so para a lista inteira.
+ *
+ * Conta so o que veio da OUTRA parte, depois da ultima leitura deste lado.
+ * Sem linha de leitura, tudo o que a outra parte mandou conta.
+ */
+export async function unreadCounts(
+  tx: Tx,
+  tenantId: string,
+  requestIds: string[],
+): Promise<Map<string, number>> {
+  if (requestIds.length === 0) return new Map();
+
+  const { rows } = await tx.execute(sql`
+    SELECT m.connection_request_id AS id, count(*)::int AS unread
+      FROM connection_messages m
+      LEFT JOIN connection_message_reads r
+        ON r.connection_request_id = m.connection_request_id
+       AND r.tenant_id = ${tenantId}::uuid
+     WHERE m.connection_request_id = ANY(${sql.param(requestIds)}::uuid[])
+       AND m.sender_tenant_id <> ${tenantId}::uuid
+       AND (r.last_read_at IS NULL OR m.created_at > r.last_read_at)
+     GROUP BY m.connection_request_id
+  `);
+
+  return new Map((rows as unknown as Array<{ id: string; unread: number }>).map((row) => [row.id, row.unread]));
 }

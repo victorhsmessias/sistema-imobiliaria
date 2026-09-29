@@ -96,6 +96,12 @@ export async function connectionRoutes(app: FastifyInstance): Promise<void> {
     },
   );
 
+  app.post('/connections/:id/read', guard, async (request, reply) => {
+    const { id } = parseOrThrow(idParams, request.params);
+    await service.markRead(actorOf(request), id);
+    return reply.code(204).send();
+  });
+
   app.post(
     '/connections/:id/revoke',
     { preHandler: [app.authenticate, requirePlatformAdmin] },

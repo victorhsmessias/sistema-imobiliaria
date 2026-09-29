@@ -600,6 +600,37 @@ describe('conexoes entre parceiros', () => {
       expect(response.statusCode).toBe(401);
       expect(response.body).not.toContain('Tenho um cliente');
     });
+
+    it('nao lidas: sobem para quem recebe, nao contam as proprias e zeram com /read', async () => {
+      const id = (await pedir(betaListings[13]!)).json().connection.id;
+      await app.inject({ method: 'POST', url: `/connections/${id}/approve`, cookies: beta });
+
+      async function naoLidas(cookies: Record<string, string>, role: 'sent' | 'received') {
+        const response = await app.inject({ method: 'GET', url: `/connections?role=${role}&limit=100`, cookies });
+        return response.json().items.find((i: { id: string }) => i.id === id).unreadCount as number;
+      }
+
+      expect(await naoLidas(beta, 'received')).toBe(0);
+      await enviar(alfa, id, 'Primeira');
+      await enviar(alfa, id, 'Segunda');
+      expect(await naoLidas(beta, 'received')).toBe(2);
+      expect(await naoLidas(alfa, 'sent')).toBe(0);
+
+      const lido = await app.inject({ method: 'POST', url: `/connections/${id}/read`, cookies: beta });
+      expect(lido.statusCode).toBe(204);
+      expect(await naoLidas(beta, 'received')).toBe(0);
+
+      await enviar(alfa, id, 'Terceira');
+      expect(await naoLidas(beta, 'received')).toBe(1);
+
+      const detalhe = await app.inject({ method: 'GET', url: `/connections/${id}`, cookies: beta });
+      expect(detalhe.json().connection.unreadCount).toBe(1);
+    });
+
+    it('terceiro nao marca como lida a conversa dos outros', async () => {
+      const response = await app.inject({ method: 'POST', url: `/connections/${conversa}/read`, cookies: carlos });
+      expect(response.statusCode).toBe(404);
+    });
   });
 
   describe('nenhum contato atravessa', () => {

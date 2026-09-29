@@ -133,6 +133,9 @@ export const connectionDto = z.object({
    * `connection_requester()` e `connection_disclosure()`.
    */
   counterpart: connectionParty.optional(),
+
+  /** Mensagens da outra parte que esta imobiliaria ainda nao marcou como lidas. */
+  unreadCount: z.number().int().min(0),
 });
 export type ConnectionDto = z.infer<typeof connectionDto>;
 
