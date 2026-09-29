@@ -50,6 +50,22 @@
   color: var(--ink-3);
 }
 
+a.place {
+  color: inherit;
+  text-decoration: none;
+}
+
+a.place:hover {
+  text-decoration: underline;
+}
+
+.badges {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
 .specs {
   margin: 0;
   font-size: 13.5px;

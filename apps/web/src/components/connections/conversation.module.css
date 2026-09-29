@@ -1,0 +1,137 @@
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  max-width: 880px;
+}
+
+.back {
+  align-self: flex-start;
+  font-size: 13px;
+  color: var(--ink-2);
+  text-decoration: none;
+}
+
+.back:hover {
+  text-decoration: underline;
+}
+
+.head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.title {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.specs,
+.with {
+  margin: 0;
+  font-size: 13.5px;
+  color: var(--ink-2);
+}
+
+.thread {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 16px;
+  max-height: 60vh;
+  overflow-y: auto;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-m);
+}
+
+.messages {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.mine,
+.theirs {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  max-width: 78%;
+}
+
+.mine {
+  align-self: flex-end;
+  align-items: flex-end;
+}
+
+.theirs {
+  align-self: flex-start;
+}
+
+.bubble {
+  margin: 0;
+  padding: 8px 12px;
+  border-radius: var(--radius-m);
+  font-size: 14px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.mine .bubble {
+  background: var(--action);
+  color: #fff;
+}
+
+.theirs .bubble {
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+}
+
+.meta {
+  font-size: 11.5px;
+  color: var(--ink-3);
+}
+
+.notice {
+  margin: 0;
+  padding: 10px 14px;
+  background: var(--warn-soft);
+  color: var(--warn);
+  border-radius: var(--radius-s);
+  font-size: 13.5px;
+}
+
+.composer {
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+}
+
+.composer textarea {
+  flex: 1;
+  min-height: 64px;
+  resize: vertical;
+}
+
+@media (max-width: 560px) {
+  .head {
+    flex-direction: column;
+  }
+
+  .mine,
+  .theirs {
+    max-width: 92%;
+  }
+
+  .composer {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}
