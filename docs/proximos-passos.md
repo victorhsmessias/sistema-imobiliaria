@@ -58,13 +58,18 @@ outra parte, nem depois do aceite. Aprovada a conexão, abre-se uma opção de *
 parte pelo próprio sistema**.
 
 Isso muda a regra "aprovar é que revela o dono" do [`plano.md`](plano.md) (tabela "Quem vê
-o quê" e a função `connection_disclosure`). Design em andamento; detalhes a definir antes de
-implementar:
+o quê" e a função `connection_disclosure`).
 
-- se a marca do parceiro continua aparecendo depois do aceite;
-- se o dono também deixa de ver o contato de quem pediu;
-- como é a conversa (mensagens dentro da conexão, notificação por e-mail, sanitização de
-  telefone/e-mail no texto) e o que acontece com ela quando a conexão é revogada.
+**Implementado na branch `feat/conexao-mensagens`**, com testes (suíte do banco: 39 testes;
+suíte da API: 226 testes; typecheck limpo nos quatro pacotes). Falta o deploy, que depende de
+aprovação explícita: aplicar a migration `0005_connection_messages` e o `10_security.sql`
+novo, e subir `api` e `web`.
+
+Ficou fora desta spec:
+- notificação por e-mail da conversa;
+- tela da plataforma para ler o texto original (sem máscara) de uma mensagem;
+- se a revogação deve bloquear "Pedir de novo" no mesmo imóvel;
+- remover a coluna `disclosure_level`, que ficou sem uso.
 
 ---
 

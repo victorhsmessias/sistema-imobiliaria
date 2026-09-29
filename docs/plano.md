@@ -31,8 +31,8 @@ Um parceiro já consegue, hoje:
    vendo o diff anúncio a anúncio e resolvendo na tela os bairros que o catálogo não reconheceu.
 3. **Buscar na carteira agregada** por bairro, tipo, quartos, área e faixa de valor, sem
    descobrir de quem é nenhum imóvel.
-4. **Pedir conexão** num imóvel de outro parceiro. O dono vê quem pediu e decide; só depois do
-   aceite o contato dele aparece — e o endereço, nunca.
+4. **Pedir conexão** num imóvel de outro parceiro. O dono vê quem pediu e decide; depois do
+   aceite, as duas imobiliárias conversam pelo sistema, sem trocar contato — e o endereço, nunca.
 
 O que sustenta essa afirmação: **201 testes** (31 no banco, 170 na API), typecheck limpo nos
 quatro pacotes, e as imagens de produção construindo e subindo (API respondendo `/health`, web
@@ -150,7 +150,7 @@ Atualizado em 16/09/2026. Verificado com migrate → seed → todas as suítes, 
 | 3 | Download seguro (SSRF) e re-hospedagem das fotos do `<Media>` | **pronto** |
 | — | Tabelas `import_sources`/`import_jobs`/`import_items` com FORCE RLS; dry-run; relatório de diff por anúncio | **pronto** |
 | — | Rotas `/imports/*` (só `partner_admin`) | **pronto** — execução em processo, sem fila ainda |
-| 5 | **Fluxo de conexão**: pedir, aprovar, recusar, cancelar, expirar, revelação controlada + tela | **pronto** — falta notificação por e-mail |
+| 5 | **Fluxo de conexão**: pedir, aprovar, recusar, cancelar, expirar, revelação controlada + tela; conversa pelo sistema (28/09) | **pronto** — falta notificação por e-mail |
 | 3b | **Tela de importação e curadoria**: cadastrar feed, simular, ver o diff, ligar grafia a bairro | **pronto** (16/09/2026) |
 
 **201 testes verdes**: 31 no banco (isolamento, anonimização, RLS da importação e das conexões) e
@@ -410,21 +410,18 @@ credencia quem entra, arbitra e pode suspender. Rotas: `POST /connections`,
 `POST /connections/:id/{approve,reject,cancel}`. Qualquer usuário do parceiro usa (não exige
 `partner_admin`: é ato comercial, não configuração de conta).
 
-> **Revisado em 28/09/2026 (a implementar).** O cliente decidiu que nenhum contato aparece para a
-> outra parte, nem depois do aceite: os dois lados veem só a marca, e a negociação segue por
-> mensagens dentro do sistema. A tabela abaixo descreve o que está em produção hoje; a regra
-> nova está em [`superpowers/specs/2026-09-28-conexao-sem-contato-mensagens-design.md`](superpowers/specs/2026-09-28-conexao-sem-contato-mensagens-design.md).
-
 **Quem vê o quê:**
 
 | Momento | O dono vê | Quem pediu vê |
 |---|---|---|
-| Pedido criado | marca, corretor, telefone e e-mail de quem pediu, mais o recado | nada do dono |
-| Recusado / expirado / cancelado | idem | nada do dono; só o motivo, se houver |
-| **Aprovado** | idem | marca do parceiro e, no nível `partner_contact`, contato do corretor |
-| Sempre | — | **nunca o endereço, o título, a descrição nem o código interno** |
+| Pedido pendente | marca de quem pediu + recado (mascarado) | nada do dono |
+| Recusado / expirado / cancelado | marca de quem pediu | nada do dono; só a nota de recusa (mascarada) |
+| **Aprovado** | marca de quem pediu + conversa | marca do dono + conversa |
+| **Revogado** | marca + conversa só leitura | marca + conversa só leitura |
+| Sempre | nunca corretor, telefone, e-mail | nunca corretor, telefone, e-mail, endereço, título, descrição, código interno |
 
-A assimetria é deliberada: pedir conexão é se identificar; aprovar é que revela o dono.
+Pedir conexão é se identificar como imobiliária; aprovar abre a conversa. Contato de pessoa
+nunca atravessa.
 
 **Onde a regra mora:** em funções `SECURITY DEFINER` (`connection_disclosure`,
 `connection_requester`, `connection_listing`, `network_listing_owner`), não no service. O
@@ -436,9 +433,8 @@ valor devolvido só carimba a linha, nunca chega ao cliente.
 **Prazo:** pedido pendente expira em 7 dias. A varredura roda na leitura (volume pequeno) e
 vira job quando a fila entrar; o evento de expiração fica sem ator, e a trilha mostra "plataforma".
 
-**Trilha:** cada transição vira evento, inclusive a primeira abertura dos dados revelados
-(`disclosed`). O evento diz **de que lado** veio o ato, nunca quem é — mostrar o nome de quem
-recusou revelaria o dono justamente no caso em que ele disse não.
+**Trilha:** cada transição vira evento. O evento diz **de que lado** veio o ato, nunca quem é —
+mostrar o nome de quem recusou revelaria o dono justamente no caso em que ele disse não.
 
 ### Pesquisa que embasou a decisão (15/09/2026)
 
@@ -491,7 +487,7 @@ do Casafari e do Top Agent Network não foram verificadas.
 | 3b | **Tela de importação e curadoria**: cadastrar feed, rodar dry-run, ver diff, resolver `needs_curation` criando alias | 2d | **pronto** |
 | 3c | Autocomplete de bairro no servidor (`pg_trgm`, cidade no rótulo) quando houver mais de uma cidade | 1d | pendente |
 | 4 | Pipeline de sanitização de descrição (telefone, e-mail, URL, marcas) + `description_sanitized` na view | 2d | pendente |
-| 5 | **Fluxo de conexão**: pedir, aprovar, recusar, cancelar, expirar, revelação controlada, tela | 3d | **pronto** |
+| 5 | **Fluxo de conexão**: pedir, aprovar, recusar, cancelar, expirar, revelação controlada, tela; conversa pelo sistema (28/09) | 3d | **pronto** |
 | 5b | Notificação por e-mail (pedido recebido, decisão tomada, pedido perto de vencer) | 1d | pendente |
 | 6 | Auditoria completa das transições + tela de histórico por conexão | 1d | parcial — trilha pronta (`connection_events`), falta tela |
 | 7 | Compartilhamento: link com token + página anônima + PDF com metadata limpo | 3d | pendente |
@@ -549,5 +545,6 @@ pnpm test:api     # 170 testes: auth, carteira, busca, mídia, importação, par
    contadores e diff; num item em curadoria, escolher o bairro e ligar a grafia; importar de
    verdade e conferir que o imóvel entrou com as fotos.
 7. Como B: "Pedir conexão" num imóvel de A → em **Conexões**, o pedido aparece sem nada de A.
-   Como A: o pedido mostra quem pediu, com contato. A aprova → B passa a ver marca e contato de
-   A, e continua sem endereço. A trilha mostra `requested`, `approved` e `disclosed`.
+   Como A: o pedido mostra só a marca de quem pediu, nunca corretor, telefone ou e-mail. A
+   aprova → abre a conversa: os dois lados veem só a marca um do outro, e continua sem
+   endereço. A trilha mostra `requested` e `approved`.

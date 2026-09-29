@@ -197,14 +197,17 @@ A busca é anônima; a conexão é o caminho para negociar. **O dono do imóvel 
 — a plataforma não aprova conexão a conexão.
 
 - Quem pede aparece para o dono já no pedido: pedir é se identificar.
-- O dono só aparece para quem pediu **depois do aceite**, e mesmo assim sem endereço, título,
-  descrição nem código interno.
-- A regra de revelação está no banco, em `connection_disclosure()`: a função só devolve linha se
-  a conexão estiver aprovada e se quem pergunta for o solicitante.
+- O dono só aparece para quem pediu **depois do aceite**, e mesmo assim só a marca — nunca
+  corretor, telefone, e-mail, endereço, título, descrição nem código interno.
+- A regra de revelação está no banco, em `connection_disclosure()`: a função só devolve a marca
+  do dono se a conexão estiver `approved` ou `revoked` e quem pergunta for o solicitante.
 - `network_listing_owner()` existe porque quem pede não pode descobrir o dono — a view de busca
   não tem `tenant_id`. O valor só carimba a linha do pedido e nunca chega ao cliente.
-- Pedido pendente expira em 7 dias. Cada transição vira evento, incluindo a primeira abertura dos
-  dados revelados; o evento diz de que lado veio o ato, nunca quem é.
+- Pedido pendente expira em 7 dias. Cada transição vira evento; não é mais gravado um evento na
+  primeira abertura dos dados revelados. O evento diz de que lado veio o ato, nunca quem é.
+- Conexão aprovada abre uma conversa pelo sistema (`connection_messages`); revogada, a conversa
+  continua visível, só leitura. Contato digitado no texto (mensagem, recado do pedido ou nota de
+  recusa) vira `[contato removido]`.
 
 ## Importação VrSync
 
