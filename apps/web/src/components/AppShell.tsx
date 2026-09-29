@@ -1,7 +1,10 @@
 'use client';
 
+import type { ConnectionDto } from '@imob/contracts';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { useEffect, useState } from 'react';
+import { apiFetch } from '@/lib/api';
 import { BrandMark } from './BrandMark';
 import { Icon } from './Icon';
 import { useSession } from './SessionProvider';
@@ -20,10 +23,41 @@ function initials(name: string): string {
   return ((parts[0]?.[0] ?? '') + (parts.length > 1 ? (parts[parts.length - 1]?.[0] ?? '') : '')).toUpperCase();
 }
 
+/**
+ * Total de mensagens nao lidas, somado das duas caixas.
+ *
+ * Recalcula a cada troca de pagina, sem rota nova: a lista ja traz
+ * unreadCount. Sessao sem parceiro (admin da plataforma) nao tem conexao e
+ * nao chama nada -- chamaria so para receber 401.
+ */
+function useUnreadConnections(enabled: boolean, pathname: string): number {
+  const [unread, setUnread] = useState(0);
+
+  useEffect(() => {
+    if (!enabled) return;
+    let alive = true;
+    Promise.all(
+      (['received', 'sent'] as const).map((role) =>
+        apiFetch<{ items: ConnectionDto[] }>(`/connections?role=${role}&limit=100`),
+      ),
+    )
+      .then((lists) => {
+        if (alive) setUnread(lists.flatMap((list) => list.items).reduce((sum, item) => sum + item.unreadCount, 0));
+      })
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, [enabled, pathname]);
+
+  return unread;
+}
+
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const { user, logout } = useSession();
   const partner = user.tenant?.displayName ?? 'Plataforma';
+  const unread = useUnreadConnections(Boolean(user.tenant), pathname);
 
   return (
     <div className={styles.shell}>
@@ -45,6 +79,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 aria-current={active ? 'page' : undefined}
               >
                 {item.label}
+                {item.href === '/conexoes' && unread > 0 && (
+                  <span className={styles.navCount} aria-label={`${unread} mensagens não lidas`}>
+                    {unread}
+                  </span>
+                )}
               </Link>
             );
           })}
