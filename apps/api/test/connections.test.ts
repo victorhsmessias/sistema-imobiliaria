@@ -631,6 +631,47 @@ describe('conexoes entre parceiros', () => {
       const response = await app.inject({ method: 'POST', url: `/connections/${conversa}/read`, cookies: carlos });
       expect(response.statusCode).toBe(404);
     });
+
+    it('recado do pedido com telefone chega mascarado ao dono', async () => {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/connections',
+        cookies: alfa,
+        payload: { listingId: betaListings[14]!, message: 'Me chama no 43 98010-1000' },
+      });
+      expect(response.statusCode).toBe(201);
+      const id = response.json().connection.id;
+      criados.push(id);
+      expect(response.json().connection.message).toBe('Me chama no [contato removido]');
+
+      const doDono = await app.inject({ method: 'GET', url: `/connections/${id}`, cookies: beta });
+      expect(doDono.body).not.toContain('98010-1000');
+
+      const audit = await withOracle(async (client) => {
+        const { rows } = await client.query<{ metadata: { field: string; original: string } }>(
+          `SELECT metadata FROM audit_log
+            WHERE action = 'connection.message_masked' AND entity_id::text = $1`,
+          [id],
+        );
+        return rows[0]!.metadata;
+      });
+      expect(audit).toEqual({ field: 'message', original: 'Me chama no 43 98010-1000' });
+    });
+
+    it('nota de recusa com e-mail chega mascarada a quem pediu', async () => {
+      const id = (await pedir(betaListings[15]!)).json().connection.id;
+      const recusado = await app.inject({
+        method: 'POST',
+        url: `/connections/${id}/reject`,
+        cookies: beta,
+        payload: { note: 'Fale com vendas@beta.com.br' },
+      });
+      expect(recusado.statusCode).toBe(200);
+      expect(recusado.json().connection.decisionNote).toBe('Fale com [contato removido]');
+
+      const visao = await app.inject({ method: 'GET', url: `/connections/${id}`, cookies: alfa });
+      expect(visao.body).not.toContain('vendas@beta.com.br');
+    });
   });
 
   describe('nenhum contato atravessa', () => {

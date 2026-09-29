@@ -133,13 +133,16 @@ export async function request(
       throw validationFailed({ listingId: 'Você já tem um pedido pendente para este imóvel.' });
     }
 
+    // O recado e texto livre para o dono: contato digitado nao atravessa.
+    const recado = input.message === null ? null : maskContacts(input.message);
+
     const expiresAt = new Date(Date.now() + TTL_DAYS * 24 * 60 * 60 * 1000);
     const row = await repo.insertRequest(tx, {
       propertyId: input.listingId,
       requesterTenantId: actor.tenantId,
       requesterUserId: actor.userId,
       ownerTenantId,
-      message: input.message,
+      message: recado?.text ?? null,
       expiresAt,
     });
 
@@ -159,6 +162,21 @@ export async function request(
       ip: actor.ip,
       userAgent: actor.userAgent,
     });
+
+    if (recado?.masked) {
+      // Recado nao tem coluna de original: ele fica na auditoria de quem
+      // escreveu, que o outro lado nao le.
+      await recordAudit(tx, {
+        tenantId: actor.tenantId,
+        actorUserId: actor.userId,
+        action: 'connection.message_masked',
+        entityType: 'connection_request',
+        entityId: row.id,
+        metadata: { field: 'message', original: input.message },
+        ip: actor.ip,
+        userAgent: actor.userAgent,
+      });
+    }
 
     return hydrate(tx, row, actor, await loadListing(tx, row.id), 0);
   });
@@ -230,9 +248,12 @@ async function transition(
       throw validationFailed({ status: `Este pedido já está como "${row.status}".` });
     }
 
+    // A nota vai para a outra parte: contato digitado nao atravessa.
+    const filtered = note === null ? null : maskContacts(note);
+
     const updated = await repo.updateRequest(tx, id, {
       status: decision,
-      decisionNote: note,
+      decisionNote: filtered?.text ?? null,
       ...(decision === 'cancelled'
         ? {}
         : { decidedByUserId: actor.userId, decidedAt: new Date() }),
@@ -254,6 +275,19 @@ async function transition(
       ip: actor.ip,
       userAgent: actor.userAgent,
     });
+
+    if (filtered?.masked) {
+      await recordAudit(tx, {
+        tenantId: actor.tenantId,
+        actorUserId: actor.userId,
+        action: 'connection.message_masked',
+        entityType: 'connection_request',
+        entityId: id,
+        metadata: { field: 'decision_note', original: note },
+        ip: actor.ip,
+        userAgent: actor.userAgent,
+      });
+    }
 
     return hydrate(tx, updated, actor, await loadListing(tx, id), 0);
   });
