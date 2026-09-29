@@ -4,6 +4,7 @@ import type { ConnectionDto, ConnectionEventDto, ConnectionMessageDto } from '@i
 import Link from 'next/link';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiFetch, ApiError } from '@/lib/api';
+import { CONNECTIONS_READ_EVENT } from '@/lib/events';
 import { formatArea } from '@/lib/format';
 import { CONNECTION_BADGE, CONNECTION_LABELS, TYPE_LABELS, plural } from '@/lib/labels';
 import { connectionPrice } from './price';
@@ -47,7 +48,9 @@ export function ConversationView({ id }: { id: string }) {
   const endRef = useRef<HTMLDivElement>(null);
 
   const markRead = useCallback(() => {
-    void apiFetch<void>(`/connections/${id}/read`, { method: 'POST' }).catch(() => undefined);
+    void apiFetch<void>(`/connections/${id}/read`, { method: 'POST' })
+      .then(() => window.dispatchEvent(new Event(CONNECTIONS_READ_EVENT)))
+      .catch(() => undefined);
   }, [id]);
 
   /**
@@ -58,10 +61,20 @@ export function ConversationView({ id }: { id: string }) {
     if (incoming.length === 0) return;
     setMessages((current) => {
       const known = new Set(current.map((m) => m.id));
-      const merged = [...current, ...incoming.filter((m) => !known.has(m.id))].sort(byTime);
-      lastId.current = merged[merged.length - 1]?.id ?? null;
-      return merged;
+      return [...current, ...incoming.filter((m) => !known.has(m.id))].sort(byTime);
     });
+  }, []);
+
+  /**
+   * O cursor so avanca com o que o servidor devolveu num GET (carga inicial
+   * ou atualizacao periodica). Se avancasse com a resposta do POST de envio,
+   * o proximo GET com after=<mensagem enviada> pularia qualquer mensagem da
+   * outra parte que tivesse chegado um instante antes do envio.
+   */
+  const advanceCursor = useCallback((items: ConnectionMessageDto[]) => {
+    if (items.length === 0) return;
+    const newest = items.reduce((a, b) => (byTime(a, b) >= 0 ? a : b));
+    lastId.current = newest.id;
   }, []);
 
   useEffect(() => {
@@ -75,6 +88,7 @@ export function ConversationView({ id }: { id: string }) {
         if (!alive) return;
         setDetail(loaded);
         merge(first.items);
+        advanceCursor(first.items);
         markRead();
       } catch (reason) {
         if (alive) setError(reason instanceof ApiError ? reason.message : 'Não foi possível abrir a conexão.');
@@ -83,7 +97,7 @@ export function ConversationView({ id }: { id: string }) {
     return () => {
       alive = false;
     };
-  }, [id, merge, markRead]);
+  }, [id, merge, advanceCursor, markRead]);
 
   const loadNew = useCallback(async () => {
     const query = lastId.current ? `?after=${lastId.current}` : '';
@@ -91,12 +105,13 @@ export function ConversationView({ id }: { id: string }) {
       const { items } = await apiFetch<MessagesResponse>(`/connections/${id}/messages${query}`);
       if (items.length > 0) {
         merge(items);
+        advanceCursor(items);
         markRead();
       }
     } catch {
       // A proxima volta tenta de novo; nao vale interromper quem esta lendo.
     }
-  }, [id, merge, markRead]);
+  }, [id, merge, advanceCursor, markRead]);
 
   // Atualizacao periodica, so com a aba visivel.
   useEffect(() => {
@@ -131,6 +146,9 @@ export function ConversationView({ id }: { id: string }) {
       merge([result.message]);
       setMaskedNotice(result.masked);
       setDraft('');
+      // Busca o que chegou da outra parte antes do envio; o cursor so avanca
+      // com isso, entao a propria mensagem enviada volta aqui e a dedupe cuida.
+      void loadNew();
     } catch (reason) {
       setError(reason instanceof ApiError ? reason.message : 'Não foi possível enviar agora.');
     } finally {
