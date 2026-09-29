@@ -372,6 +372,118 @@ describe('isolamento por tenant (RLS)', () => {
         asTenant(client, alfa.id, () => client.query('DELETE FROM connection_requests')),
       ).rejects.toThrow(/permission denied/i);
     });
+
+    function inserirMensagem(tenantId: string, requestId: string, senderTenantId: string, body = 'Olá') {
+      return asTenant(client, tenantId, () =>
+        client.query(
+          `INSERT INTO connection_messages (connection_request_id, sender_tenant_id, body)
+           VALUES ($1, $2, $3) RETURNING id`,
+          [requestId, senderTenantId, body],
+        ),
+      );
+    }
+
+    it('conversa: as duas pontas leem, terceiro nao, e sem tenant nao ha nada', async () => {
+      const id = await criarPedido();
+      const carlos = tenants[2] as SeededTenant;
+      try {
+        await mudarStatus(id, 'approved');
+        await inserirMensagem(alfa.id, id, alfa.id);
+
+        for (const tenant of [alfa, beta]) {
+          const { rows } = await asTenant(client, tenant.id, () =>
+            client.query('SELECT id, body FROM connection_messages WHERE connection_request_id = $1', [id]),
+          );
+          expect(rows, `${tenant.slug} deveria ler a conversa`).toHaveLength(1);
+        }
+
+        const terceiro = await asTenant(client, carlos.id, () =>
+          client.query('SELECT id FROM connection_messages WHERE connection_request_id = $1', [id]),
+        );
+        expect(terceiro.rows).toHaveLength(0);
+
+        const semTenant = await client.query<{ count: string }>(
+          'SELECT count(*)::text AS count FROM connection_messages',
+        );
+        expect(semTenant.rows[0]?.count).toBe('0');
+      } finally {
+        await removerPedido(id);
+      }
+    });
+
+    it('so conversa em conexao aprovada', async () => {
+      for (const status of ['pending', 'rejected', 'revoked', 'expired', 'cancelled']) {
+        const id = await criarPedido();
+        try {
+          await mudarStatus(id, status);
+          await expect(inserirMensagem(alfa.id, id, alfa.id), `status ${status}`).rejects.toThrow(
+            /row-level security|violates/i,
+          );
+        } finally {
+          await removerPedido(id);
+        }
+      }
+    });
+
+    it('nao manda mensagem em nome da outra parte', async () => {
+      const id = await criarPedido();
+      try {
+        await mudarStatus(id, 'approved');
+        await expect(inserirMensagem(alfa.id, id, beta.id)).rejects.toThrow(/row-level security|violates/i);
+      } finally {
+        await removerPedido(id);
+      }
+    });
+
+    it('o texto original nunca e legivel pela aplicacao', async () => {
+      await expect(
+        asTenant(client, alfa.id, () => client.query('SELECT body_original FROM connection_messages')),
+      ).rejects.toThrow(/permission denied/i);
+      await expect(
+        asTenant(client, alfa.id, () => client.query('SELECT * FROM connection_messages')),
+      ).rejects.toThrow(/permission denied/i);
+    });
+
+    it('a conversa e append-only', async () => {
+      await expect(
+        asTenant(client, alfa.id, () => client.query(`UPDATE connection_messages SET body = 'x'`)),
+      ).rejects.toThrow(/permission denied/i);
+      await expect(
+        asTenant(client, alfa.id, () => client.query('DELETE FROM connection_messages')),
+      ).rejects.toThrow(/permission denied/i);
+    });
+
+    it('leitura: cada parceiro so ve e grava a propria linha', async () => {
+      const id = await criarPedido();
+      try {
+        await mudarStatus(id, 'approved');
+
+        await asTenant(client, alfa.id, () =>
+          client.query(
+            `INSERT INTO connection_message_reads (connection_request_id, tenant_id, last_read_at)
+             VALUES ($1, $2, now())`,
+            [id, alfa.id],
+          ),
+        );
+
+        await expect(
+          asTenant(client, alfa.id, () =>
+            client.query(
+              `INSERT INTO connection_message_reads (connection_request_id, tenant_id, last_read_at)
+               VALUES ($1, $2, now())`,
+              [id, beta.id],
+            ),
+          ),
+        ).rejects.toThrow(/row-level security|violates/i);
+
+        const daBeta = await asTenant(client, beta.id, () =>
+          client.query('SELECT tenant_id FROM connection_message_reads WHERE connection_request_id = $1', [id]),
+        );
+        expect(daBeta.rows).toHaveLength(0);
+      } finally {
+        await removerPedido(id);
+      }
+    });
   });
 
   it('RLS esta habilitado, e FORCE onde o dono tambem precisa ser barrado', async () => {
@@ -384,6 +496,8 @@ describe('isolamento por tenant (RLS)', () => {
       'import_items',
       'connection_requests',
       'connection_events',
+      'connection_messages',
+      'connection_message_reads',
     ];
     const all = [...forced, 'users', 'tenants', 'audit_log'];
 

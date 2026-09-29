@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm';
-import { index, jsonb, pgTable, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
+import { check, index, jsonb, pgTable, primaryKey, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
 import { connectionEventTypeEnum, connectionStatusEnum, disclosureLevelEnum } from './enums.js';
 import { properties } from './properties.js';
 import { tenants } from './tenants.js';
@@ -97,6 +97,62 @@ export const connectionEvents = pgTable(
   (t) => [index('connection_events_request_idx').on(t.connectionRequestId, t.createdAt)],
 );
 
+/**
+ * Conversa de uma conexao aprovada. Append-only: sem UPDATE nem DELETE.
+ *
+ * E o unico canal entre as partes -- contato de pessoa nunca atravessa (spec
+ * de 28/09/2026). `body` ja chega mascarado pelo filtro de contato.
+ * `body_original` so existe quando a mascara agiu, e o app_user NAO tem
+ * SELECT nessa coluna (grant por coluna em sql/10_security.sql): nenhum
+ * `select()` da aplicacao pode pedir a tabela inteira.
+ */
+export const connectionMessages = pgTable(
+  'connection_messages',
+  {
+    id: uuid().primaryKey().default(sql`gen_random_uuid()`),
+    connectionRequestId: uuid()
+      .notNull()
+      .references(() => connectionRequests.id, { onDelete: 'cascade' }),
+    senderTenantId: uuid()
+      .notNull()
+      .references(() => tenants.id, { onDelete: 'restrict' }),
+    senderUserId: uuid().references(() => users.id, { onDelete: 'set null' }),
+
+    body: text().notNull(),
+    bodyOriginal: text(),
+
+    createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index('connection_messages_request_idx').on(t.connectionRequestId, t.createdAt, t.id),
+    // A API limita a entrada a 2000; a mascara pode alongar o texto.
+    check('connection_messages_body_length', sql`char_length(${t.body}) BETWEEN 1 AND 8000`),
+  ],
+);
+
+/**
+ * Ate onde cada imobiliaria leu a conversa. Uma linha por lado.
+ *
+ * Por tenant, e nao por usuario: a conexao e ato da imobiliaria. Fica fora de
+ * connection_requests para marcar leitura sem mexer no updated_at da conexao
+ * e sem deixar um lado marcar como lido pelo outro.
+ */
+export const connectionMessageReads = pgTable(
+  'connection_message_reads',
+  {
+    connectionRequestId: uuid()
+      .notNull()
+      .references(() => connectionRequests.id, { onDelete: 'cascade' }),
+    tenantId: uuid()
+      .notNull()
+      .references(() => tenants.id, { onDelete: 'cascade' }),
+    lastReadAt: timestamp({ withTimezone: true }).notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.connectionRequestId, t.tenantId] })],
+);
+
 export type ConnectionRequest = typeof connectionRequests.$inferSelect;
 export type NewConnectionRequest = typeof connectionRequests.$inferInsert;
 export type ConnectionEvent = typeof connectionEvents.$inferSelect;
+export type ConnectionMessage = typeof connectionMessages.$inferSelect;
+export type ConnectionMessageRead = typeof connectionMessageReads.$inferSelect;
