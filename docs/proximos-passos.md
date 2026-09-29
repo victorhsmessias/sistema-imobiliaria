@@ -78,6 +78,19 @@ Ficou fora desta spec:
 - se a revogação deve bloquear "Pedir de novo" no mesmo imóvel;
 - remover a coluna `disclosure_level`, que ficou sem uso.
 
+Pendências conhecidas (não bloqueiam o merge):
+- **Teste frágil** em `apps/api/test/connections.test.ts`, "quem pediu nao ve o dono enquanto o
+  pedido pende": procura a marca da Beta no corpo **inteiro** da lista de enviados da Alfa. Se o
+  banco local já tiver uma conexão Alfa→Beta aprovada ou revogada (por exemplo, depois de usar o
+  app), o teste falha sem haver vazamento. Correção: olhar só o item pendente criado pelo teste.
+- **Falso positivo do filtro**: intervalo de anos escrito com traço ("reformado 2020-2021") vira
+  `[contato removido]`, porque tem a forma de um telefone de 8 dígitos sem DDD.
+- O filtro não pega contato escrito com separador fora da lista (espaço, ponto, traço,
+  parênteses), como `43_98020_2000`, nem número por extenso. É limite de regex; a trilha de
+  auditoria `connection.message_masked` ajuda a achar quem tenta contornar.
+- A conversa carrega as 200 mensagens mais recentes; não há "carregar anteriores" (a API já
+  devolve `hasMore`).
+
 ---
 
 ## 3. Segurança e operação

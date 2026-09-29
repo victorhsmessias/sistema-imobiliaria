@@ -304,9 +304,11 @@ tradução → `outro` com aviso no relatório.
 - **`import_jobs`** — `source_id` · `status` (`queued|running|succeeded|failed`) · `dry_run` · `stats` jsonb · `error`
 - **`import_items`** — `job_id` · `external_id` ⚠️ · `property_id` · `status` (`created|updated|unchanged|archived|skipped|needs_curation|failed`) · `changes` (campo → de/para) · `warnings` · `errors` · `raw_payload` ⚠️ (o `<Listing>` original, **único lugar onde `<Zone>` é guardado**)
 
-### Conexões (FORCE RLS) — implementado em 15/09/2026
-- **`connection_requests`** — `property_id` · `requester_tenant_id` · `requester_user_id` · `owner_tenant_id` · `status` (`pending|approved|rejected|cancelled|expired|revoked`) · `disclosure_level` (`partner|partner_contact`) · `message` · `decision_note` · `decided_by_user_id` · `decided_at` · `expires_at` — unique parcial `(property_id, requester_tenant_id) WHERE status='pending'`
-- **`connection_events`** — `type` (`requested|approved|rejected|cancelled|expired|revoked|disclosed`) · `actor_tenant_id` (nulo = expiração automática) · `actor_user_id` · `metadata` — append-only
+### Conexões (FORCE RLS) — implementado em 15/09/2026; conversa em 28/09/2026
+- **`connection_requests`** — `property_id` · `requester_tenant_id` · `requester_user_id` · `owner_tenant_id` · `status` (`pending|approved|rejected|cancelled|expired|revoked`) · `disclosure_level` (sem uso desde 28/09: só a marca atravessa; sai numa migration futura) · `message` (recado, já mascarado) · `decision_note` (já mascarada) · `decided_by_user_id` · `decided_at` · `expires_at` — unique parcial `(property_id, requester_tenant_id) WHERE status='pending'`
+- **`connection_events`** — `type` (`requested|approved|rejected|cancelled|expired|revoked|disclosed`; `disclosed` não é mais gravado desde 28/09 e fica só pela trilha antiga) · `actor_tenant_id` (nulo = expiração automática ou plataforma) · `actor_user_id` · `metadata` — append-only
+- **`connection_messages`** — `connection_request_id` · `sender_tenant_id` · `sender_user_id` · `body` (já mascarado; check 1–8000) · `body_original` (só quando a máscara agiu; **sem SELECT para `app_user`**, grant por coluna) · `created_at` — append-only; `INSERT` só em conexão `approved`; índice `(connection_request_id, created_at, id)`
+- **`connection_message_reads`** — PK `(connection_request_id, tenant_id)` · `last_read_at` — uma linha por imobiliária; cada lado só lê e grava a própria
 
 > **A linha pertence a DOIS tenants.** É a primeira do sistema assim: as policies comparam as
 > duas pontas (`requester_tenant_id` ou `owner_tenant_id`), e não o `tenant_id` único das
