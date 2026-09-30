@@ -61,17 +61,20 @@ parte pelo próprio sistema**.
 Isso muda a regra "aprovar é que revela o dono" do [`plano.md`](plano.md) (tabela "Quem vê
 o quê" e a função `connection_disclosure`).
 
-**Implementado na branch `feat/conexao-mensagens`**, com testes (suíte do banco: 39 testes;
+**Em produção desde 30/09/2026 (`a1e0bd9`)**, com testes (suíte do banco: 39 testes;
 suíte da API: 230 testes; typecheck limpo nos quatro pacotes). Validado no navegador em
 ambiente local em 29/09: pedido e aceite mostram só a marca (tela e JSON cru), conversa com
 máscara de telefone, não lidas no cartão e no menu, revogação só leitura nos dois lados. A
 validação achou e corrigiu uma corrida em que o envio escondia a mensagem recém-chegada da
-outra parte. Falta o deploy, que depende de aprovação explícita: aplicar a migration
-`0005_connection_messages` e o `10_security.sql` novo, e subir `api` e `web`.
+outra parte.
 
-**Antes do deploy:** recados e notas de recusa gravados antes desta mudança não passaram
-pelo filtro. Contar em produção quantos `message`/`decision_note` têm telefone, e-mail ou
-link; se houver parceiro real afetado, mascarar também na leitura.
+**Deploy de 30/09:** antes, conferidos os 17 recados e notas antigos em produção (nenhum com
+contato, então nada a mascarar na leitura) e feito `pg_dump` do banco
+(`/root/deploy/backup-pre-a1e0bd9.sql.gz` na VPS). Migration `0005` e `10_security.sql`
+aplicados com `[migrate] ok`; `api` e `web` promovidos pelo Swarm (ver `deploy.md`, seção 6).
+Verificado em produção: roteiro de conexão pela API (24/24: pedido, aceite só com a marca,
+conversa, máscara, não lidas, revogação só leitura, nenhum contato nas respostas), conversa e
+importação por arquivo na tela, conta da plataforma sem erro.
 
 Ficou fora desta spec:
 - notificação por e-mail da conversa;
@@ -96,7 +99,7 @@ Pendências conhecidas (não bloqueiam o merge):
 |---|---|---|---|
 | 3.1 | **Trocar a senha de root da VPS** e passar a usar só chave SSH (`PasswordAuthentication no`) | A senha atual circulou fora do servidor | 15 min |
 | 3.2 | ~~Gerar nova chave de acesso do Cloudflare R2~~ **feito em 30/09** | A API de produção apontava para um bucket inexistente (`imob-media`) com uma chave sem acesso; nenhuma foto carregava. Agora `S3_BUCKET=sistema-imob` e chave nova com leitura e escrita só nesse bucket. Os arquivos das fotos antigas nunca existiram no R2: os 276 registros de foto sem arquivo (Alfa, Beta, Carlos) foram apagados pela API. Falta revogar o token `wandering-darkness-a06a` se não for usado | — |
-| 3.3 | **Remover o contêiner órfão da API** (`sistemaimob_api.1…` criado em 24/09) | Ficou rodando fora do Swarm; só recebe health check e ocupa ~60 MB | 5 min |
+| 3.3 | ~~Remover o contêiner órfão da API~~ **resolvido em 30/09** | Sumiu na troca de versão da `api`; agora roda uma instância de cada serviço | — |
 | 3.4 | **Nunca rodar o seed em produção** a partir de agora | `seed.ts` começa com `TRUNCATE` de parceiros, usuários, imóveis e auditoria. Com o primeiro parceiro real, o seed apaga tudo | — |
 | 3.5 | Instalar o GitHub CLI (`gh`) e voltar ao fluxo de PR | O último merge na `main` foi feito direto, sem PR | 10 min |
 | 3.6 | Atualizar a linha "Revogação de conexão pela plataforma" em `plano.md` | Ainda diz que falta a rota de admin | 5 min |

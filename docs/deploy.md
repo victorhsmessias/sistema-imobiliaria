@@ -129,6 +129,29 @@ ou se as views não pertencerem a `app_network_reader`, ele falha e o deploy par
 
 Ordem numa promoção: `migrate` → subir `api` → subir `web`.
 
+### Deploy manual pela VPS (sem o painel)
+
+Usado em 30/09/2026, com o deploy automático do EasyPanel desligado. Reproduz o que o painel faz
+— as imagens se chamam `easypanel/sistemaimob/api` e `easypanel/sistemaimob/web` e os serviços do
+Swarm, `sistemaimob_api` e `sistemaimob_web`:
+
+1. Guardar a versão atual para rollback:
+   `docker tag easypanel/sistemaimob/api:latest easypanel/sistemaimob/api:rollback-AAAAMMDD` (idem `web`).
+2. Levar o código (`git archive <commit>` enviado por SFTP) e construir com etiqueta própria, a
+   partir da raiz: `docker build -f docker/Dockerfile.api -t easypanel/sistemaimob/api:<commit> .`
+   (idem `Dockerfile.web`).
+3. Backup antes de mexer no schema:
+   `docker exec <contêiner do bd> sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" --no-owner' | gzip > backup.sql.gz`.
+4. Migrate **com a imagem nova, antes de promover**, usando as variáveis do próprio serviço:
+   exportar o `Env` de `docker service inspect sistemaimob_api` para um arquivo (`umask 077`) e
+   `docker run --rm --network easypanel-sistemaimob --env-file <arquivo> -w /app/apps/api <imagem nova> node --import tsx ../../packages/db/src/migrate.ts`.
+   Apagar o arquivo de variáveis em seguida. Se não terminar em `[migrate] ok`, parar aqui.
+5. Promover: `docker tag <imagem nova> easypanel/sistemaimob/api:latest` e
+   `docker service update --force --no-resolve-image --detach=false sistemaimob_api`; depois o `web`.
+   O healthcheck segura a troca se o contêiner novo não subir.
+6. Rollback: `docker tag easypanel/sistemaimob/api:rollback-AAAAMMDD easypanel/sistemaimob/api:latest`
+   e o mesmo `service update`. Migration não se desfaz sozinha: para voltar o schema, restaurar o backup.
+
 ## 7. Dados de demonstração (opcional)
 
 Só para ambiente de demonstração, nunca com dados reais:
