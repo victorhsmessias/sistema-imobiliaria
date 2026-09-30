@@ -93,7 +93,13 @@ Nenhuma das telas é só "lista feliz":
   recarregar. Mensagens são juntadas por `id` e ordenadas por `createdAt`. Ao abrir e ao receber
   novas, chama `POST /connections/:id/read` e dispara `CONNECTIONS_READ_EVENT` (`lib/events.ts`),
   que faz o menu recontar as não lidas.
-- **Importação**: simular é o padrão; a tela precisa deixar claro que nada foi gravado.
+- **Importação**: simular é o padrão; a tela precisa deixar claro que nada foi gravado. Feed com
+  URL grava por "Importar de verdade" na lista de feeds; feed por **arquivo** não tem URL para
+  reler, então a tela guarda o último arquivo simulado e, depois de uma simulação bem-sucedida,
+  oferece "Importar de verdade" e "Simular de novo" com o mesmo arquivo (útil depois da
+  curadoria de bairro). Após gravar, o arquivo é descartado.
+- **Conta sem parceiro** (`platform_admin`): o `AppShell` esconde o menu e mostra "Conta da
+  plataforma" no lugar das telas, que são todas de parceiro e só responderiam 401.
 
 ## Armadilhas já pagas
 

@@ -42,7 +42,8 @@ revogação.
 - Revogar sem corpo com `content-type: application/json` dá 400, não 422. Continua
   bloqueado; só o código difere.
 - `platform_admin` não tem tela: cai em `/busca`, vê "Sessão sem parceiro associado." e o
-  cliente faz 401 → refresh → 401.
+  cliente faz 401 → refresh → 401. *(Corrigido na branch em 30/09: a conta da plataforma vê
+  "Conta da plataforma", sem menu e sem chamadas que dariam 401.)*
 - Depois de uma revogação pela plataforma, quem pediu vê "Pedir de novo" no anúncio e pode
   abrir outro pedido. Decidir se revogação deve bloquear novo pedido no mesmo imóvel.
 - As respostas saem com `access-control-allow-origin: http://143.95.167.29:3100` (IP, não o
@@ -94,7 +95,7 @@ Pendências conhecidas (não bloqueiam o merge):
 | # | Item | Por quê | Esforço |
 |---|---|---|---|
 | 3.1 | **Trocar a senha de root da VPS** e passar a usar só chave SSH (`PasswordAuthentication no`) | A senha atual circulou fora do servidor | 15 min |
-| 3.2 | **Gerar nova chave de acesso do Cloudflare R2** | A chave antiga estava no `.env` de desenvolvimento e circulou junto | 15 min |
+| 3.2 | ~~Gerar nova chave de acesso do Cloudflare R2~~ **feito em 30/09** | A API de produção apontava para um bucket inexistente (`imob-media`) com uma chave sem acesso; nenhuma foto carregava. Agora `S3_BUCKET=sistema-imob` e chave nova com leitura e escrita só nesse bucket. Os arquivos das fotos antigas nunca existiram no R2: os 276 registros de foto sem arquivo (Alfa, Beta, Carlos) foram apagados pela API. Falta revogar o token `wandering-darkness-a06a` se não for usado | — |
 | 3.3 | **Remover o contêiner órfão da API** (`sistemaimob_api.1…` criado em 24/09) | Ficou rodando fora do Swarm; só recebe health check e ocupa ~60 MB | 5 min |
 | 3.4 | **Nunca rodar o seed em produção** a partir de agora | `seed.ts` começa com `TRUNCATE` de parceiros, usuários, imóveis e auditoria. Com o primeiro parceiro real, o seed apaga tudo | — |
 | 3.5 | Instalar o GitHub CLI (`gh`) e voltar ao fluxo de PR | O último merge na `main` foi feito direto, sem PR | 10 min |

@@ -82,6 +82,12 @@ export function ImportsView() {
   const [curating, setCurating] = useState<Record<string, string>>({});
   const fileInput = useRef<HTMLInputElement>(null);
   const [pendingSourceId, setPendingSourceId] = useState<string | null>(null);
+  /**
+   * Ultimo arquivo simulado. Feed por arquivo nao tem URL para reler: sem
+   * guardar o arquivo, a simulacao seria um beco sem saida e a carteira nunca
+   * seria gravada.
+   */
+  const [lastFile, setLastFile] = useState<{ sourceId: string; file: File } | null>(null);
 
   const isAdmin = user.role === 'partner_admin';
 
@@ -165,8 +171,15 @@ export function ImportsView() {
   async function runFromFile(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     event.target.value = '';
-    if (!file || !pendingSourceId) return;
+    const sourceId = pendingSourceId;
+    setPendingSourceId(null);
+    if (!file || !sourceId) return;
 
+    setLastFile({ sourceId, file });
+    await uploadFile(sourceId, file, true);
+  }
+
+  async function uploadFile(sourceId: string, file: File, dryRun: boolean) {
     setBusy(true);
     setError(null);
     setNotice(null);
@@ -175,15 +188,17 @@ export function ImportsView() {
       // Os bytes vão crus: o encoding vem no prolog do XML, e converter para
       // texto aqui estragaria acento de arquivo ISO-8859-1.
       const { job } = await apiFetch<{ job: ImportJobDto }>(
-        `/imports/sources/${pendingSourceId}/upload?dryRun=true`,
+        `/imports/sources/${sourceId}/upload?dryRun=${dryRun}`,
         { method: 'POST', body: file, headers: { 'Content-Type': 'application/xml' } },
       );
       setJob(job);
-      await follow(job.id);
+      const finished = await follow(job.id);
+      // Gravado de verdade: o arquivo sai de cena para ninguem importar duas vezes.
+      if (!dryRun && finished?.status === 'succeeded') setLastFile(null);
+      await loadSources();
     } catch (reason) {
       setError(reason instanceof ApiError ? reason.message : 'Não foi possível ler o arquivo.');
     } finally {
-      setPendingSourceId(null);
       setBusy(false);
     }
   }
@@ -367,6 +382,28 @@ export function ImportsView() {
             <p className="hint">
               Nada foi gravado. Confira o resultado e use “Importar de verdade” quando estiver certo.
             </p>
+          )}
+
+          {job.dryRun && !running && job.status === 'succeeded' && lastFile?.sourceId === job.sourceId && (
+            <div className={styles.actions}>
+              <button
+                type="button"
+                className="btn btn-primary btn-sm"
+                disabled={busy}
+                onClick={() => void uploadFile(lastFile.sourceId, lastFile.file, false)}
+              >
+                Importar de verdade
+              </button>
+              <button
+                type="button"
+                className="btn btn-sm"
+                disabled={busy}
+                onClick={() => void uploadFile(lastFile.sourceId, lastFile.file, true)}
+              >
+                Simular de novo
+              </button>
+              <span className="hint">{lastFile.file.name}</span>
+            </div>
           )}
 
           <dl className={styles.stats}>

@@ -67,7 +67,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const { user, logout } = useSession();
   const partner = user.tenant?.displayName ?? 'Plataforma';
-  const unread = useUnreadConnections(Boolean(user.tenant), pathname);
+  // Sessao sem parceiro (admin da plataforma): as telas sao todas de parceiro e
+  // so responderiam 401 "Sessao sem parceiro associado", em loop de renovacao.
+  const hasPartner = Boolean(user.tenant);
+  const unread = useUnreadConnections(hasPartner, pathname);
 
   return (
     <div className={styles.shell}>
@@ -79,7 +82,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </Link>
 
         <nav className={styles.nav} aria-label="Principal">
-          {NAV.filter((item) => !item.adminOnly || user.role === 'partner_admin').map((item) => {
+          {NAV.filter((item) => hasPartner && (!item.adminOnly || user.role === 'partner_admin')).map((item) => {
             const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
             return (
               <Link
@@ -119,7 +122,23 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </div>
       </header>
 
-      <main className={styles.main}>{children}</main>
+      <main className={styles.main}>
+        {hasPartner ? (
+          children
+        ) : (
+          <div>
+            <h1 className="page-title">Conta da plataforma</h1>
+            <p className="lead">
+              Esta conta administra a rede e não tem carteira de imobiliária. Busca, carteira,
+              conexões e importação são telas dos parceiros.
+            </p>
+            <p className="hint">
+              A revogação de conexões ainda é feita pela API (<code>POST /connections/:id/revoke</code>);
+              a tela da plataforma é uma etapa futura.
+            </p>
+          </div>
+        )}
+      </main>
     </div>
   );
 }
