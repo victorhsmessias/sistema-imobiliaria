@@ -39,7 +39,7 @@ Rota valida e traduz HTTP; service tem a regra e abre `withTenant`; repository f
 | `media` | upload, ordem, URL assinada | `processPropertyImage` remove EXIF; nunca adicione `.withMetadata()` |
 | `catalog` | cidades, bairros, aliases, resolução de grafia | escrita só via `catalog_add_alias()` |
 | `imports` | XML VrSync: parser, tipo, bairro, fotos, arquivamento | `safeFetch` obrigatório em toda URL do feed |
-| `connections` | pedir, aprovar, recusar, cancelar, expirar | linha de **dois** tenants; revelação no banco |
+| `connections` | pedir, aprovar, recusar, cancelar, expirar, conversa, não lidas | linha de **dois** tenants; só a marca atravessa, e o corte está no banco |
 | `audit` | trilha append-only | `recordAudit` recebe a transação, nunca abre a própria |
 
 ## Padrões obrigatórios
@@ -97,17 +97,42 @@ feed. **Toda URL do feed passa por `lib/safe-fetch.ts`** — é entrada não con
 ## Conexões, em uma passada
 
 Primeira tabela cuja linha pertence a **dois** tenants: as policies comparam
-`requester_tenant_id` **ou** `owner_tenant_id`. O dono vê quem pediu desde o pedido; o
-solicitante só vê o dono depois do aceite — e isso está no `WHERE` de `connection_disclosure()`,
-no banco, não no service. `network_listing_owner()` existe porque quem pede não pode descobrir o
-dono (a view não tem `tenant_id`); o valor só carimba a linha.
+`requester_tenant_id` **ou** `owner_tenant_id`. Cada lado vê da outra parte **só a marca**
+(`counterpart.partnerName`): o dono desde o pedido, por `connection_requester()`; o solicitante
+em `approved` ou `revoked`, por `connection_disclosure()`. As duas funções devolvem apenas
+`partner_name` — contato de pessoa nunca sai do banco, nem numa consulta futura.
+`network_listing_owner()` existe porque quem pede não pode descobrir o dono (a view não tem
+`tenant_id`); o valor só carimba a linha.
+
+**Conversa.** Aprovada a conexão, as partes negociam por mensagens:
+
+| Rota | Faz |
+|---|---|
+| `GET /connections/:id/messages[?after=<id>]` | as 200 mais recentes, ou as posteriores a `after`; `{ items, hasMore }` |
+| `POST /connections/:id/messages` `{ body }` | 1–2000 caracteres; 201 `{ message, masked }`; 422 fora de `approved`; limite de 30/min |
+| `POST /connections/:id/read` | marca a conversa como lida por este parceiro; 204 |
+
+- `connection_messages` é append-only e tem RLS das duas pontas; o `INSERT` exige conexão
+  `approved` **no banco**, então revogada fica só leitura mesmo sem o service.
+- `lib/contact-filter.ts` (`maskContacts`) troca telefone, e-mail, link e @perfil por
+  `[contato removido]` na mensagem, no recado do pedido e na nota de recusa. O original da
+  mensagem fica em `body_original`, e o `app_user` **não tem SELECT nessa coluna** (grant por
+  coluna; o `migrate` confere). Por isso **todo `select`/`returning` em `connection_messages`
+  passa a lista de colunas** — `select()` sem lista morre com "permission denied". O original de
+  recado e nota vai no `metadata` da auditoria `connection.message_masked`, no tenant de quem
+  escreveu.
+- O cursor `after` é comparado **no SQL**, contra a linha do cursor: `created_at` tem
+  microssegundos e o `Date` do JS só milissegundos, e comparar com o valor vindo do JS devolveria
+  a própria mensagem do cursor.
+- Não lidas: `connection_message_reads`, uma linha por imobiliária (não por usuário);
+  `unreadCount` vem em todo `ConnectionDto`, calculado numa consulta só para a lista.
 
 ## Verificação
 
 ```bash
 pnpm db:migrate && pnpm db:seed
-pnpm test:rls    # 31 testes: isolamento e anonimização, contra Postgres real
-pnpm test:api    # 170 testes
+pnpm test:rls    # 39 testes: isolamento e anonimização, contra Postgres real
+pnpm test:api    # 230 testes
 pnpm typecheck
 ```
 

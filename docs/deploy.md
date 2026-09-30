@@ -51,7 +51,7 @@ de criar extensões. Se o provedor não permitir `CREATE EXTENSION`, peça `pgcr
 
 ## 2. Bucket de mídia
 
-No R2, crie o bucket (ex.: `imob-media`) e um token com leitura e escrita **apenas nele**.
+No R2, crie o bucket (em produção: `sistema-imob`) e um token com leitura e escrita **apenas nele**.
 O bucket precisa ser privado: nenhuma foto é servida por URL pública.
 
 ## 3. Segredos
@@ -85,7 +85,7 @@ Comuns aos dois serviços de aplicação:
 | `TRUST_PROXY_HOPS` | `1` | cadeia Traefik → Next → API |
 | `API_HOST` / `API_PORT` | `0.0.0.0` / `3333` | |
 | `S3_ENDPOINT` | `https://<conta>.r2.cloudflarestorage.com` | |
-| `S3_BUCKET` / `S3_REGION` | `imob-media` / `auto` | |
+| `S3_BUCKET` / `S3_REGION` | `sistema-imob` / `auto` | tem que ser o nome **exato** do bucket no R2, e o token precisa de leitura e escrita nele. Nome errado ou token de outro bucket: o R2 responde `AccessDenied` e nenhuma foto carrega nem sobe |
 | `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY` | token do R2 | |
 | `S3_FORCE_PATH_STYLE` | `true` | R2 e MinIO usam path-style |
 | `S3_SIGNED_URL_TTL` | `300` | validade da URL da foto |

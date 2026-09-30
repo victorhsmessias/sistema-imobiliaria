@@ -133,8 +133,8 @@ export function ListingRow({
               <span className="badge badge-warn">{CONNECTION_LABELS.pending}</span>
             )}
             {listing.connection?.status === 'approved' && (
-              <Link href="/conexoes" className="btn btn-sm">
-                Ver contato
+              <Link href={`/conexoes/${listing.connection.id}`} className="btn btn-sm">
+                Abrir conversa
               </Link>
             )}
             {listing.connection !== null &&

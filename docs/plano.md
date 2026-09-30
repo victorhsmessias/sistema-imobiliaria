@@ -31,10 +31,10 @@ Um parceiro já consegue, hoje:
    vendo o diff anúncio a anúncio e resolvendo na tela os bairros que o catálogo não reconheceu.
 3. **Buscar na carteira agregada** por bairro, tipo, quartos, área e faixa de valor, sem
    descobrir de quem é nenhum imóvel.
-4. **Pedir conexão** num imóvel de outro parceiro. O dono vê quem pediu e decide; só depois do
-   aceite o contato dele aparece — e o endereço, nunca.
+4. **Pedir conexão** num imóvel de outro parceiro. O dono vê quem pediu e decide; depois do
+   aceite, as duas imobiliárias conversam pelo sistema, sem trocar contato — e o endereço, nunca.
 
-O que sustenta essa afirmação: **201 testes** (31 no banco, 170 na API), typecheck limpo nos
+O que sustenta essa afirmação: **269 testes** (39 no banco, 230 na API), typecheck limpo nos
 quatro pacotes, e as imagens de produção construindo e subindo (API respondendo `/health`, web
 servindo `/login`). Detalhe por tarefa nas tabelas de status abaixo.
 
@@ -150,11 +150,11 @@ Atualizado em 16/09/2026. Verificado com migrate → seed → todas as suítes, 
 | 3 | Download seguro (SSRF) e re-hospedagem das fotos do `<Media>` | **pronto** |
 | — | Tabelas `import_sources`/`import_jobs`/`import_items` com FORCE RLS; dry-run; relatório de diff por anúncio | **pronto** |
 | — | Rotas `/imports/*` (só `partner_admin`) | **pronto** — execução em processo, sem fila ainda |
-| 5 | **Fluxo de conexão**: pedir, aprovar, recusar, cancelar, expirar, revelação controlada + tela | **pronto** — falta notificação por e-mail |
+| 5 | **Fluxo de conexão**: pedir, aprovar, recusar, cancelar, expirar, revelação controlada + tela; conversa pelo sistema (28/09) | **pronto** — falta notificação por e-mail |
 | 3b | **Tela de importação e curadoria**: cadastrar feed, simular, ver o diff, ligar grafia a bairro | **pronto** (16/09/2026) |
 
-**201 testes verdes**: 31 no banco (isolamento, anonimização, RLS da importação e das conexões) e
-170 na API (auth, carteira, busca, mídia, importação, parser VrSync, SSRF, conexões e curadoria).
+**269 testes verdes**: 39 no banco (isolamento, anonimização, RLS da importação e das conexões) e
+230 na API (auth, carteira, busca, mídia, importação, parser VrSync, SSRF, conexões e curadoria).
 
 ### Decisões do cliente registradas (12/09/2026)
 
@@ -304,9 +304,11 @@ tradução → `outro` com aviso no relatório.
 - **`import_jobs`** — `source_id` · `status` (`queued|running|succeeded|failed`) · `dry_run` · `stats` jsonb · `error`
 - **`import_items`** — `job_id` · `external_id` ⚠️ · `property_id` · `status` (`created|updated|unchanged|archived|skipped|needs_curation|failed`) · `changes` (campo → de/para) · `warnings` · `errors` · `raw_payload` ⚠️ (o `<Listing>` original, **único lugar onde `<Zone>` é guardado**)
 
-### Conexões (FORCE RLS) — implementado em 15/09/2026
-- **`connection_requests`** — `property_id` · `requester_tenant_id` · `requester_user_id` · `owner_tenant_id` · `status` (`pending|approved|rejected|cancelled|expired|revoked`) · `disclosure_level` (`partner|partner_contact`) · `message` · `decision_note` · `decided_by_user_id` · `decided_at` · `expires_at` — unique parcial `(property_id, requester_tenant_id) WHERE status='pending'`
-- **`connection_events`** — `type` (`requested|approved|rejected|cancelled|expired|revoked|disclosed`) · `actor_tenant_id` (nulo = expiração automática) · `actor_user_id` · `metadata` — append-only
+### Conexões (FORCE RLS) — implementado em 15/09/2026; conversa em 28/09/2026
+- **`connection_requests`** — `property_id` · `requester_tenant_id` · `requester_user_id` · `owner_tenant_id` · `status` (`pending|approved|rejected|cancelled|expired|revoked`) · `disclosure_level` (sem uso desde 28/09: só a marca atravessa; sai numa migration futura) · `message` (recado, já mascarado) · `decision_note` (já mascarada) · `decided_by_user_id` · `decided_at` · `expires_at` — unique parcial `(property_id, requester_tenant_id) WHERE status='pending'`
+- **`connection_events`** — `type` (`requested|approved|rejected|cancelled|expired|revoked|disclosed`; `disclosed` não é mais gravado desde 28/09 e fica só pela trilha antiga) · `actor_tenant_id` (nulo = expiração automática ou plataforma) · `actor_user_id` · `metadata` — append-only
+- **`connection_messages`** — `connection_request_id` · `sender_tenant_id` · `sender_user_id` · `body` (já mascarado; check 1–8000) · `body_original` (só quando a máscara agiu; **sem SELECT para `app_user`**, grant por coluna) · `created_at` — append-only; `INSERT` só em conexão `approved`; índice `(connection_request_id, created_at, id)`
+- **`connection_message_reads`** — PK `(connection_request_id, tenant_id)` · `last_read_at` — uma linha por imobiliária; cada lado só lê e grava a própria
 
 > **A linha pertence a DOIS tenants.** É a primeira do sistema assim: as policies comparam as
 > duas pontas (`requester_tenant_id` ou `owner_tenant_id`), e não o `tenant_id` único das
@@ -414,12 +416,14 @@ credencia quem entra, arbitra e pode suspender. Rotas: `POST /connections`,
 
 | Momento | O dono vê | Quem pediu vê |
 |---|---|---|
-| Pedido criado | marca, corretor, telefone e e-mail de quem pediu, mais o recado | nada do dono |
-| Recusado / expirado / cancelado | idem | nada do dono; só o motivo, se houver |
-| **Aprovado** | idem | marca do parceiro e, no nível `partner_contact`, contato do corretor |
-| Sempre | — | **nunca o endereço, o título, a descrição nem o código interno** |
+| Pedido pendente | marca de quem pediu + recado (mascarado) | nada do dono |
+| Recusado / expirado / cancelado | marca de quem pediu | nada do dono; só a nota de recusa (mascarada) |
+| **Aprovado** | marca de quem pediu + conversa | marca do dono + conversa |
+| **Revogado** | marca + conversa só leitura | marca + conversa só leitura |
+| Sempre | nunca corretor, telefone, e-mail | nunca corretor, telefone, e-mail, endereço, título, descrição, código interno |
 
-A assimetria é deliberada: pedir conexão é se identificar; aprovar é que revela o dono.
+Pedir conexão é se identificar como imobiliária; aprovar abre a conversa. Contato de pessoa
+nunca atravessa.
 
 **Onde a regra mora:** em funções `SECURITY DEFINER` (`connection_disclosure`,
 `connection_requester`, `connection_listing`, `network_listing_owner`), não no service. O
@@ -431,9 +435,8 @@ valor devolvido só carimba a linha, nunca chega ao cliente.
 **Prazo:** pedido pendente expira em 7 dias. A varredura roda na leitura (volume pequeno) e
 vira job quando a fila entrar; o evento de expiração fica sem ator, e a trilha mostra "plataforma".
 
-**Trilha:** cada transição vira evento, inclusive a primeira abertura dos dados revelados
-(`disclosed`). O evento diz **de que lado** veio o ato, nunca quem é — mostrar o nome de quem
-recusou revelaria o dono justamente no caso em que ele disse não.
+**Trilha:** cada transição vira evento. O evento diz **de que lado** veio o ato, nunca quem é —
+mostrar o nome de quem recusou revelaria o dono justamente no caso em que ele disse não.
 
 ### Pesquisa que embasou a decisão (15/09/2026)
 
@@ -486,7 +489,7 @@ do Casafari e do Top Agent Network não foram verificadas.
 | 3b | **Tela de importação e curadoria**: cadastrar feed, rodar dry-run, ver diff, resolver `needs_curation` criando alias | 2d | **pronto** |
 | 3c | Autocomplete de bairro no servidor (`pg_trgm`, cidade no rótulo) quando houver mais de uma cidade | 1d | pendente |
 | 4 | Pipeline de sanitização de descrição (telefone, e-mail, URL, marcas) + `description_sanitized` na view | 2d | pendente |
-| 5 | **Fluxo de conexão**: pedir, aprovar, recusar, cancelar, expirar, revelação controlada, tela | 3d | **pronto** |
+| 5 | **Fluxo de conexão**: pedir, aprovar, recusar, cancelar, expirar, revelação controlada, tela; conversa pelo sistema (28/09) | 3d | **pronto** |
 | 5b | Notificação por e-mail (pedido recebido, decisão tomada, pedido perto de vencer) | 1d | pendente |
 | 6 | Auditoria completa das transições + tela de histórico por conexão | 1d | parcial — trilha pronta (`connection_events`), falta tela |
 | 7 | Compartilhamento: link com token + página anônima + PDF com metadata limpo | 3d | pendente |
@@ -517,7 +520,7 @@ do Casafari e do Top Agent Network não foram verificadas.
 | Pendência | O que trava | Premissa para seguir |
 |---|---|---|
 | ~~Quem aprova a conexão~~ | — | **Resolvido (15/09/2026)**: o dono aprova cada pedido; a plataforma credencia, arbitra e pode suspender. |
-| ~~O que é liberado após aprovar~~ | — | **Resolvido**: `disclosure_level` por pedido — marca do parceiro, ou marca + contato do corretor. Endereço nunca. |
+| ~~O que é liberado após aprovar~~ | — | ~~Resolvido: `disclosure_level` por pedido~~. **Revisto em 28/09/2026**: só a marca, para os dois lados; contato nunca; conversa pelo sistema (ver spec de 28/09). Endereço nunca. |
 | **Termo de parceria antes de liberar o contato?** | Nada hoje | Em aberto. Tem precedente fora do imobiliário (M&A, ReferralExchange); no Brasil o termo vem depois do contato. Implementar exigiria uma coluna de aceite e uma etapa na tela. |
 | Revogação de conexão pela plataforma | Nada hoje | O status `revoked` já existe no schema; falta a rota de admin, que precisa de um caminho para `platform_admin` (hoje sem tenant no contexto). |
 | ~~XML traz fotos?~~ | — | **Resolvido**: VrSync traz em `<Media>`; re-hospedagem implementada. |
@@ -530,8 +533,8 @@ do Casafari e do Top Agent Network não foram verificadas.
 
 ```bash
 pnpm db:migrate && pnpm db:seed
-pnpm test:rls     # 31 testes: isolamento, anonimização, RLS da importação e das conexões
-pnpm test:api     # 170 testes: auth, carteira, busca, mídia, importação, parser, SSRF, conexões, curadoria
+pnpm test:rls     # 39 testes: isolamento, anonimização, RLS da importação e das conexões
+pnpm test:api     # 230 testes: auth, carteira, busca, mídia, importação, parser, SSRF, conexões, curadoria
 ```
 
 **Fim a fim, manual**
@@ -544,5 +547,6 @@ pnpm test:api     # 170 testes: auth, carteira, busca, mídia, importação, par
    contadores e diff; num item em curadoria, escolher o bairro e ligar a grafia; importar de
    verdade e conferir que o imóvel entrou com as fotos.
 7. Como B: "Pedir conexão" num imóvel de A → em **Conexões**, o pedido aparece sem nada de A.
-   Como A: o pedido mostra quem pediu, com contato. A aprova → B passa a ver marca e contato de
-   A, e continua sem endereço. A trilha mostra `requested`, `approved` e `disclosed`.
+   Como A: o pedido mostra só a marca de quem pediu, nunca corretor, telefone ou e-mail. A
+   aprova → abre a conversa: os dois lados veem só a marca um do outro, e continua sem
+   endereço. A trilha mostra `requested` e `approved`.

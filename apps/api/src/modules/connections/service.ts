@@ -2,12 +2,15 @@ import type {
   ConnectionDto,
   ConnectionEventDto,
   ConnectionListing,
-  ConnectionParty,
+  ConnectionMessageDto,
   ConnectionStatus,
   CreateConnectionInput,
   DecideConnectionInput,
+  MessageListQuery,
+  SendMessageInput,
 } from '@imob/contracts';
 import { withLateTenant, withTenant, type ConnectionEvent, type ConnectionRequest, type Tx } from '@imob/db';
+import { maskContacts } from '../../lib/contact-filter.js';
 import { forbidden, notFound, validationFailed } from '../../lib/errors.js';
 import { recordAudit } from '../audit/service.js';
 import type { ActorContext } from '../properties/service.js';
@@ -21,11 +24,9 @@ import * as repo from './repository.js';
  * a partir da pesquisa de mercado: e o que tem precedente (Homer, ImovelPro,
  * Casafari Connect) e o que menos trava a liquidez da rede.
  *
- * O que cada lado enxerga:
- *  - o dono ve quem pediu desde o pedido (pedir e se identificar);
- *  - quem pediu so ve o dono depois do aceite, e nunca o endereco.
- * As duas regras estao nas funcoes SECURITY DEFINER, nao aqui: o service
- * apenas escolhe quais campos mostrar dentro do que o banco liberou.
+ * O que cada lado enxerga da outra parte: so a marca. O dono ve quem pediu
+ * desde o pedido; quem pediu ve o dono so depois do aceite. Contato de pessoa
+ * nunca atravessa -- a negociacao segue pelas mensagens da conexao.
  */
 
 /** Prazo do pedido pendente. Sem prazo, a caixa do dono vira cemiterio. */
@@ -53,24 +54,6 @@ function toListing(row: repo.ListingRow): ConnectionListing {
   };
 }
 
-/**
- * Aplica o nivel de disclosure.
- *
- * `partner` mostra so a marca; `partner_contact` mostra tambem o corretor.
- * Cortar aqui, e nao na consulta, mantem um lugar unico para a politica.
- */
-function toParty(row: repo.PartyRow, level: 'partner' | 'partner_contact'): ConnectionParty {
-  if (level === 'partner') {
-    return { partnerName: row.partner_name, brokerName: null, brokerPhone: null, brokerEmail: null };
-  }
-  return {
-    partnerName: row.partner_name,
-    brokerName: row.broker_name,
-    brokerPhone: row.broker_phone,
-    brokerEmail: row.broker_email,
-  };
-}
-
 function toEventDto(event: ConnectionEvent, actorTenantId: string): ConnectionEventDto {
   return {
     id: event.id,
@@ -90,13 +73,13 @@ async function hydrate(
   row: ConnectionRequest,
   actor: ActorContext,
   listing: repo.ListingRow,
+  unreadCount: number,
 ): Promise<ConnectionDto> {
   const role = row.ownerTenantId === actor.tenantId ? 'owner' : 'requester';
 
   const dto: ConnectionDto = {
     id: row.id,
     status: row.status,
-    disclosureLevel: row.disclosureLevel,
     role,
     message: row.message,
     decisionNote: row.decisionNote,
@@ -104,17 +87,15 @@ async function hydrate(
     decidedAt: row.decidedAt?.toISOString() ?? null,
     expiresAt: row.expiresAt.toISOString(),
     listing: toListing(listing),
+    unreadCount,
   };
 
-  if (role === 'owner') {
-    const requester = await repo.requesterOf(tx, row.id);
-    if (requester) dto.requester = toParty(requester, 'partner_contact');
-    return dto;
-  }
+  // A funcao do banco decide se a marca aparece: para o dono, sempre; para
+  // quem pediu, so em approved/revoked. Aqui so se copia o que ela liberou.
+  const party =
+    role === 'owner' ? await repo.requesterOf(tx, row.id) : await repo.disclosureOf(tx, row.id);
+  if (party) dto.counterpart = { partnerName: party.partner_name };
 
-  // Solicitante: so revela contato do dono DEPOIS de abrir (evento disclosed).
-  // Na listagem ou em outros contextos, nao mostra -- precisa entrar em detalhe.
-  // O disclosure sera adicionado por quem chama hydrate() se apropriado.
   return dto;
 }
 
@@ -152,13 +133,16 @@ export async function request(
       throw validationFailed({ listingId: 'Você já tem um pedido pendente para este imóvel.' });
     }
 
+    // O recado e texto livre para o dono: contato digitado nao atravessa.
+    const recado = input.message === null ? null : maskContacts(input.message);
+
     const expiresAt = new Date(Date.now() + TTL_DAYS * 24 * 60 * 60 * 1000);
     const row = await repo.insertRequest(tx, {
       propertyId: input.listingId,
       requesterTenantId: actor.tenantId,
       requesterUserId: actor.userId,
       ownerTenantId,
-      message: input.message,
+      message: recado?.text ?? null,
       expiresAt,
     });
 
@@ -179,7 +163,22 @@ export async function request(
       userAgent: actor.userAgent,
     });
 
-    return hydrate(tx, row, actor, await loadListing(tx, row.id));
+    if (recado?.masked) {
+      // Recado nao tem coluna de original: ele fica na auditoria de quem
+      // escreveu, que o outro lado nao le.
+      await recordAudit(tx, {
+        tenantId: actor.tenantId,
+        actorUserId: actor.userId,
+        action: 'connection.message_masked',
+        entityType: 'connection_request',
+        entityId: row.id,
+        metadata: { field: 'message', original: input.message },
+        ip: actor.ip,
+        userAgent: actor.userAgent,
+      });
+    }
+
+    return hydrate(tx, row, actor, await loadListing(tx, row.id), 0);
   });
 }
 
@@ -195,11 +194,12 @@ export async function list(
       tx,
       rows.map((row) => row.id),
     );
+    const unread = await repo.unreadCounts(tx, actor.tenantId, rows.map((row) => row.id));
 
     const items: ConnectionDto[] = [];
     for (const row of rows) {
       const listing = listings.get(row.id);
-      if (listing) items.push(await hydrate(tx, row, actor, listing));
+      if (listing) items.push(await hydrate(tx, row, actor, listing, unread.get(row.id) ?? 0));
     }
     return { items, total };
   });
@@ -216,28 +216,8 @@ export async function getById(
     // O RLS ja devolve zero linhas para quem nao e parte: 404, nunca 403.
     if (!row) throw notFound('Conexão não encontrada.');
 
-    const connection = await hydrate(tx, row, actor, await loadListing(tx, row.id));
-
-    const isRequester = row.requesterTenantId === actor.tenantId;
-    const isApproved = row.status === 'approved';
-
-    // Solicitante abrindo conexao aprovada pela primeira vez: registra evento
-    // disclosed e depois revela contato do dono. O evento e prova de que viu.
-    if (isRequester && isApproved && !(await repo.hasDisclosureEvent(tx, row.id))) {
-      await repo.insertEvent(tx, {
-        connectionRequestId: row.id,
-        type: 'disclosed',
-        actorTenantId: actor.tenantId,
-        actorUserId: actor.userId,
-      });
-    }
-
-    // Depois de criar evento, carrega o disclosure e adiciona ao DTO.
-    if (isRequester && isApproved && (await repo.hasDisclosureEvent(tx, row.id))) {
-      const disclosure = await repo.disclosureOf(tx, row.id);
-      if (disclosure) connection.disclosure = toParty(disclosure, row.disclosureLevel);
-    }
-
+    const unread = await repo.unreadCounts(tx, actor.tenantId, [row.id]);
+    const connection = await hydrate(tx, row, actor, await loadListing(tx, row.id), unread.get(row.id) ?? 0);
     const events = await repo.listEvents(tx, row.id);
     return { connection, events: events.map((event) => toEventDto(event, actor.tenantId)) };
   });
@@ -268,9 +248,12 @@ async function transition(
       throw validationFailed({ status: `Este pedido já está como "${row.status}".` });
     }
 
+    // A nota vai para a outra parte: contato digitado nao atravessa.
+    const filtered = note === null ? null : maskContacts(note);
+
     const updated = await repo.updateRequest(tx, id, {
       status: decision,
-      decisionNote: note,
+      decisionNote: filtered?.text ?? null,
       ...(decision === 'cancelled'
         ? {}
         : { decidedByUserId: actor.userId, decidedAt: new Date() }),
@@ -293,7 +276,20 @@ async function transition(
       userAgent: actor.userAgent,
     });
 
-    return hydrate(tx, updated, actor, await loadListing(tx, id));
+    if (filtered?.masked) {
+      await recordAudit(tx, {
+        tenantId: actor.tenantId,
+        actorUserId: actor.userId,
+        action: 'connection.message_masked',
+        entityType: 'connection_request',
+        entityId: id,
+        metadata: { field: 'decision_note', original: note },
+        ip: actor.ip,
+        userAgent: actor.userAgent,
+      });
+    }
+
+    return hydrate(tx, updated, actor, await loadListing(tx, id), 0);
   });
 }
 
@@ -357,6 +353,105 @@ export async function revoke(
     // A resposta sai na visao do dono: e a unica que nao revela nada alem do
     // que a plataforma ja sabe (o solicitante aparece para o dono desde o pedido).
     const ownerView: ActorContext = { ...actor, tenantId: ownerTenantId };
-    return hydrate(tx, row, ownerView, await loadListing(tx, id));
+    const unread = await repo.unreadCounts(tx, ownerTenantId, [id]);
+    return hydrate(tx, row, ownerView, await loadListing(tx, id), unread.get(id) ?? 0);
+  });
+}
+
+/**
+ * Mensagens por pagina. Conversa de conexao e curta; carregar as anteriores
+ * fica para quando alguem precisar (hasMore ja avisa).
+ */
+const MESSAGE_PAGE = 200;
+
+function toMessageDto(row: repo.MessageRow, actorTenantId: string): ConnectionMessageDto {
+  return {
+    id: row.id,
+    body: row.body,
+    author: row.senderTenantId === actorTenantId ? 'you' : 'other',
+    createdAt: row.createdAt.toISOString(),
+  };
+}
+
+/**
+ * Conversa da conexao. Sem `after`, as 200 mais recentes; com `after`, as
+ * posteriores a essa mensagem (a atualizacao periodica da tela).
+ */
+export async function listMessages(
+  actor: ActorContext,
+  id: string,
+  query: MessageListQuery,
+): Promise<{ items: ConnectionMessageDto[]; hasMore: boolean }> {
+  return withTenant(actor.tenantId, async (tx) => {
+    // O RLS ja devolve zero linhas para quem nao e parte: 404, nunca 403.
+    if (!(await repo.findById(tx, id))) throw notFound('Conexão não encontrada.');
+
+    let page: repo.MessageRow[];
+    let hasMore: boolean;
+    if (query.after) {
+      if (!(await repo.findMessage(tx, id, query.after))) throw notFound('Mensagem não encontrada.');
+      const rows = await repo.messagesAfter(tx, id, query.after, MESSAGE_PAGE + 1);
+      hasMore = rows.length > MESSAGE_PAGE;
+      page = rows.slice(0, MESSAGE_PAGE);
+    } else {
+      const rows = await repo.latestMessages(tx, id, MESSAGE_PAGE + 1);
+      hasMore = rows.length > MESSAGE_PAGE;
+      page = rows.slice(0, MESSAGE_PAGE).reverse();
+    }
+
+    return { items: page.map((row) => toMessageDto(row, actor.tenantId)), hasMore };
+  });
+}
+
+/**
+ * Envia uma mensagem. So em conexao aprovada: revogada fica so leitura.
+ *
+ * O contato digitado e mascarado antes de gravar. O original fica em
+ * body_original, que a aplicacao nao consegue ler; a auditoria registra que
+ * a mascara agiu, para a plataforma achar reincidencia.
+ */
+export async function sendMessage(
+  actor: ActorContext,
+  id: string,
+  input: SendMessageInput,
+): Promise<{ message: ConnectionMessageDto; masked: boolean }> {
+  return withTenant(actor.tenantId, async (tx) => {
+    const row = await repo.findById(tx, id);
+    if (!row) throw notFound('Conexão não encontrada.');
+    if (row.status !== 'approved') {
+      throw validationFailed({ status: 'A conversa só existe em conexão aprovada.' });
+    }
+
+    const filtered = maskContacts(input.body);
+    const message = await repo.insertMessage(tx, {
+      connectionRequestId: id,
+      senderTenantId: actor.tenantId,
+      senderUserId: actor.userId,
+      body: filtered.text,
+      bodyOriginal: filtered.masked ? input.body : null,
+    });
+
+    if (filtered.masked) {
+      await recordAudit(tx, {
+        tenantId: actor.tenantId,
+        actorUserId: actor.userId,
+        action: 'connection.message_masked',
+        entityType: 'connection_request',
+        entityId: id,
+        metadata: { field: 'body', messageId: message.id },
+        ip: actor.ip,
+        userAgent: actor.userAgent,
+      });
+    }
+
+    return { message: toMessageDto(message, actor.tenantId), masked: filtered.masked };
+  });
+}
+
+/** Marca a conversa como lida ate agora, pelo lado de quem chamou. */
+export async function markRead(actor: ActorContext, id: string): Promise<void> {
+  await withTenant(actor.tenantId, async (tx) => {
+    if (!(await repo.findById(tx, id))) throw notFound('Conexão não encontrada.');
+    await repo.markRead(tx, id, actor.tenantId);
   });
 }

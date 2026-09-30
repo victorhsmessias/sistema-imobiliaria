@@ -11,7 +11,11 @@ de imobiliária, corretor, telefone, endereço, título ou código interno no re
 adianta procurar: a API não envia. Se uma tela precisar mostrar algo assim, isso é mudança de
 produto e de banco, não de componente.
 
-O contato do dono aparece **apenas** em `/conexoes`, depois que ele aprova o pedido.
+Contato de pessoa (corretor, telefone, e-mail) também **nunca** aparece em conexão: depois do
+aceite, cada lado vê só a marca da outra imobiliária (`connection.counterpart.partnerName`) e a
+negociação segue pela conversa em `/conexoes/[id]`. Telefone, e-mail ou link digitados chegam
+como `[contato removido]` — a máscara é do servidor; a tela só mostra o aviso quando a resposta
+vem com `masked: true`.
 
 ## Telas
 
@@ -21,10 +25,12 @@ O contato do dono aparece **apenas** em `/conexoes`, depois que ele aprova o ped
 | `/busca` | `components/search/SearchView.tsx` + `ListingRow`, `NeighborhoodPicker` | filtros na URL, paginação por cursor |
 | `/carteira` | `components/property/PortfolioView.tsx` | carteira do próprio parceiro |
 | `/carteira/novo` e `/carteira/[id]` | `PropertyForm`, `EditProperty`, `MediaManager` | formulário e fotos |
-| `/conexoes` | `components/connections/ConnectionsView.tsx` | duas caixas: recebidos e enviados |
+| `/conexoes` | `components/connections/ConnectionsView.tsx` | duas caixas: recebidos e enviados; marca da outra parte e selo de não lidas |
+| `/conexoes/[id]` | `components/connections/ConversationView.tsx` | conversa da conexão; envio só em `approved`, só leitura em `revoked` |
 | `/importacao` | `components/imports/ImportsView.tsx` | **só `partner_admin`**; o menu esconde e a tela recusa |
 
-Casca e sessão: `components/AppShell.tsx` (menu, filtrado por papel) e
+Casca e sessão: `components/AppShell.tsx` (menu, filtrado por papel, com o total de mensagens
+não lidas ao lado de "Conexões") e
 `components/SessionProvider.tsx` (`useSession()` devolve `user`, com `role` e `tenant`).
 
 ## Como falar com a API
@@ -78,9 +84,22 @@ Nenhuma das telas é só "lista feliz":
 - **Carregando** (`.skeleton` na busca, texto em outras), **vazio** (com o que fazer a seguir),
   **erro** (`.alert` com `role="alert"`) e **sem permissão** (importação).
 - **Conexão**: cada anúncio na busca mostra o estado do **próprio** pedido (`listing.connection`):
-  ausente → botão "Pedir conexão"; pendente → selo; aprovada → link para `/conexoes`; recusada,
-  expirada ou cancelada → selo + "Pedir de novo".
-- **Importação**: simular é o padrão; a tela precisa deixar claro que nada foi gravado.
+  ausente → botão "Pedir conexão"; pendente → selo; aprovada → "Abrir conversa" (link para
+  `/conexoes/[id]`); recusada, expirada, cancelada ou revogada → selo + "Pedir de novo".
+- **Conversa** (`ConversationView`): carrega o detalhe e as 200 mensagens mais recentes; busca
+  novas a cada 15 s com `?after=<id>`, **só com a aba visível**. O cursor `after` só avança com o
+  que veio de um GET do servidor — nunca com a resposta do envio; depois de enviar, a tela busca
+  de novo. Sem isso, uma mensagem da outra parte chegada logo antes do envio sumiria até
+  recarregar. Mensagens são juntadas por `id` e ordenadas por `createdAt`. Ao abrir e ao receber
+  novas, chama `POST /connections/:id/read` e dispara `CONNECTIONS_READ_EVENT` (`lib/events.ts`),
+  que faz o menu recontar as não lidas.
+- **Importação**: simular é o padrão; a tela precisa deixar claro que nada foi gravado. Feed com
+  URL grava por "Importar de verdade" na lista de feeds; feed por **arquivo** não tem URL para
+  reler, então a tela guarda o último arquivo simulado e, depois de uma simulação bem-sucedida,
+  oferece "Importar de verdade" e "Simular de novo" com o mesmo arquivo (útil depois da
+  curadoria de bairro). Após gravar, o arquivo é descartado.
+- **Conta sem parceiro** (`platform_admin`): o `AppShell` esconde o menu e mostra "Conta da
+  plataforma" no lugar das telas, que são todas de parceiro e só responderiam 401.
 
 ## Armadilhas já pagas
 

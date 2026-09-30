@@ -421,8 +421,8 @@ function Loaded({ listing, requesting, actionError, onRequestConnection }: Loade
                     {requesting ? 'Enviando…' : 'Pedir conexão'}
                   </button>
                   <p className="hint">
-                    A rede não mostra quem anuncia. Quem recebe o pedido decide, e o contato aparece
-                    em Conexões depois do aceite.
+                    A rede não mostra quem anuncia. Quem recebe o pedido decide; depois do aceite,
+                    vocês conversam por aqui, em Conexões.
                   </p>
                 </>
               )}
@@ -436,11 +436,11 @@ function Loaded({ listing, requesting, actionError, onRequestConnection }: Loade
                 </>
               )}
 
-              {status === 'approved' && (
+              {status === 'approved' && listing.connection && (
                 <>
                   <span className={CONNECTION_BADGE.approved}>{CONNECTION_LABELS.approved}</span>
-                  <Link href="/conexoes" className="btn">
-                    Ver contato
+                  <Link href={`/conexoes/${listing.connection.id}`} className="btn">
+                    Abrir conversa
                   </Link>
                 </>
               )}

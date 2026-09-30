@@ -1,6 +1,7 @@
 # Próximos passos
 
-Estado em 28/09/2026, depois do deploy de `befdf52` (revogação atômica de conexões).
+Estado em 28/09/2026, depois do deploy de `befdf52` (revogação atômica de conexões) e do
+roteiro manual em produção.
 Este arquivo junta o que ficou em aberto; o detalhe de cada tarefa da Fase 1 continua em
 [`plano.md`](plano.md).
 
@@ -8,49 +9,84 @@ Este arquivo junta o que ficou em aberto; o detalhe de cada tarefa da Fase 1 con
 
 ---
 
-## 1. Terminar a validação da revogação em produção
+## 1. Validação da revogação em produção: concluída
 
-A revogação pela plataforma está em produção, mas só foi testada ponta a ponta na suíte
-automatizada (22/22 em `connections.test.ts`). O roteiro manual parou porque não existia
-conta `platform_admin`.
+Roteiro manual rodado em produção em 28/09/2026, pelo navegador, com as contas Alfa, Beta e
+`admin@platform.test`. A API se comportou como esperado em todos os casos; a tela tem um bug
+que já é tratado pela seção 2.
 
-**Situação do roteiro:**
+| Caso | Resultado | O que se viu |
+|---|---|---|
+| TC-001 Pedir, aprovar e revogar | API ok · **tela falhou** | Alfa pediu `58fc8742…` (conexão `0cc864a0…`), Beta aprovou pela tela, plataforma revogou (200, `role: "owner"`). A Alfa só via o contato pelo `GET /connections/:id`; na tela, nunca (bug abaixo) |
+| TC-002 Revogar duas vezes | passou | segunda chamada 200, um único evento `revoked` |
+| TC-003 Só a plataforma revoga | passou | rodado antes |
+| TC-004 ID inexistente | passou | 404; id que não é UUID dá 422 |
+| TC-005 Fora de `approved` | passou | pendente `98d64fb9…` e rejeitada `c944d472…`: 422, status e trilha intactos |
+| TC-006 Evento `revoked` como plataforma | passou | trilha `requested → approved → disclosed → revoked:platform` |
+| TC-007 Terceiro isolado | passou | rodado antes |
+| TC-008 Motivo obrigatório | passou | `{}`, `""` e `"   "`: 422. Sem corpo nenhum: 400 (parser do Fastify) |
+| TC-009 Os dois lados veem `revoked` | passou | tela e API, Alfa e Beta |
+| TC-010 Nível de contato | API ok · tela não verificável | conexão G (`24020366…`, `partner`) devolve só a marca. Deixa de fazer sentido com a seção 2 |
 
-| Caso | Status |
-|---|---|
-| TC-003 Só a plataforma revoga · TC-007 Terceiro isolado | passaram |
-| TC-001 Pedir, aprovar e revogar · TC-010 Nível de contato | parciais: falta a parte da revogação |
-| TC-002 Revogar duas vezes · TC-004 ID inexistente · TC-005 Fora de `approved` · TC-006 Evento `revoked` como plataforma · TC-008 Motivo obrigatório · TC-009 Os dois lados veem `revoked` | não rodados |
+A única conexão revogada foi a `0cc864a0…`, criada para o TC-001. Nenhum JSON visto pela
+Alfa trouxe nome, contato, `tenant_id` ou endereço da Beta antes do aceite ou depois da
+revogação.
 
-**O que já está pronto para o testador:**
+**Achados:**
 
-- Conta `admin@platform.test` (papel `platform_admin`, sem tenant). A senha foi entregue
-  fora do repositório.
-- Seis conexões aprovadas entre Alfa e Beta, uma pendente (`98d64fb9…`) e uma rejeitada
-  (`c944d472…`) para o TC-005.
-- A "conexão G" (`24020366…`) foi colocada em `disclosure_level = partner` para o TC-010.
-  Confirmar com o testador que é essa a conexão G.
-
-**Já verificado depois do deploy**, sem alterar dados: login do admin (200), revogar
-pendente (422, status continua `pending`), ID inexistente (404), sem motivo (422).
-
-**Comportamento esperado que mudou:** a resposta da revogação agora vem com
-`role: "owner"`. Antes vinha `requester`, porque a rota usava o id do usuário como tenant.
+- **A tela `/conexoes` nunca mostra o contato a quem pediu.** A lista vem de
+  `GET /connections`, e `list()` não inclui `disclosure`; só `GET /connections/:id` inclui,
+  e nenhuma tela chama essa rota. Por isso o evento `disclosed` só é gravado quando alguém
+  chama a API direto. Com a decisão da seção 2, o contato sai da conexão e o bug deixa de
+  existir; o evento `disclosed` precisa ser repensado junto.
+- Revogar sem corpo com `content-type: application/json` dá 400, não 422. Continua
+  bloqueado; só o código difere.
+- `platform_admin` não tem tela: cai em `/busca`, vê "Sessão sem parceiro associado." e o
+  cliente faz 401 → refresh → 401. *(Corrigido na branch em 30/09: a conta da plataforma vê
+  "Conta da plataforma", sem menu e sem chamadas que dariam 401.)*
+- Depois de uma revogação pela plataforma, quem pediu vê "Pedir de novo" no anúncio e pode
+  abrir outro pedido. Decidir se revogação deve bloquear novo pedido no mesmo imóvel.
+- As respostas saem com `access-control-allow-origin: http://143.95.167.29:3100` (IP, não o
+  domínio). O proxy é same-origin, então não quebra nada.
 
 ---
 
-## 2. Decisão de produto: quem escolhe o nível de contato (TC-010)
+## 2. Decisão de produto: contato nunca é revelado; conversa pelo sistema
 
-O [`plano.md`](plano.md) dá como resolvido que o `disclosure_level` é "por pedido": só a
-marca do parceiro, ou marca + contato do corretor. O corte funciona (`toParty` em
-`connections/service.ts`), mas **não existe como escolher o nível**: o approve só aceita
-`note`, e o banco usa `partner_contact` como padrão. Todo aceite hoje libera o contato
-completo.
+**Decidido pelo cliente em 28/09/2026.** Substitui a pergunta anterior (quem escolhe o
+`disclosure_level`). Nenhum contato (telefone, e-mail, nome do corretor) aparece para a
+outra parte, nem depois do aceite. Aprovada a conexão, abre-se uma opção de **chamar a outra
+parte pelo próprio sistema**.
 
-| Opção | O que muda | Esforço |
-|---|---|---|
-| **A. O dono escolhe ao aprovar** | Campo opcional `disclosureLevel` no approve, seletor na tela de aceite | ~0,5 dia |
-| **B. Fica como está** | Registrar no plano que o padrão é contato completo; o nível `partner` só existe via banco | nenhum |
+Isso muda a regra "aprovar é que revela o dono" do [`plano.md`](plano.md) (tabela "Quem vê
+o quê" e a função `connection_disclosure`).
+
+**Implementado na branch `feat/conexao-mensagens`**, com testes (suíte do banco: 39 testes;
+suíte da API: 230 testes; typecheck limpo nos quatro pacotes). Validado no navegador em
+ambiente local em 29/09: pedido e aceite mostram só a marca (tela e JSON cru), conversa com
+máscara de telefone, não lidas no cartão e no menu, revogação só leitura nos dois lados. A
+validação achou e corrigiu uma corrida em que o envio escondia a mensagem recém-chegada da
+outra parte. Falta o deploy, que depende de aprovação explícita: aplicar a migration
+`0005_connection_messages` e o `10_security.sql` novo, e subir `api` e `web`.
+
+**Antes do deploy:** recados e notas de recusa gravados antes desta mudança não passaram
+pelo filtro. Contar em produção quantos `message`/`decision_note` têm telefone, e-mail ou
+link; se houver parceiro real afetado, mascarar também na leitura.
+
+Ficou fora desta spec:
+- notificação por e-mail da conversa;
+- tela da plataforma para ler o texto original (sem máscara) de uma mensagem;
+- se a revogação deve bloquear "Pedir de novo" no mesmo imóvel;
+- remover a coluna `disclosure_level`, que ficou sem uso.
+
+Pendências conhecidas (não bloqueiam o merge):
+- **Falso positivo do filtro**: intervalo de anos escrito com traço ("reformado 2020-2021") vira
+  `[contato removido]`, porque tem a forma de um telefone de 8 dígitos sem DDD.
+- O filtro não pega contato escrito com separador fora da lista (espaço, ponto, traço,
+  parênteses), como `43_98020_2000`, nem número por extenso. É limite de regex; a trilha de
+  auditoria `connection.message_masked` ajuda a achar quem tenta contornar.
+- A conversa carrega as 200 mensagens mais recentes; não há "carregar anteriores" (a API já
+  devolve `hasMore`).
 
 ---
 
@@ -59,7 +95,7 @@ completo.
 | # | Item | Por quê | Esforço |
 |---|---|---|---|
 | 3.1 | **Trocar a senha de root da VPS** e passar a usar só chave SSH (`PasswordAuthentication no`) | A senha atual circulou fora do servidor | 15 min |
-| 3.2 | **Gerar nova chave de acesso do Cloudflare R2** | A chave antiga estava no `.env` de desenvolvimento e circulou junto | 15 min |
+| 3.2 | ~~Gerar nova chave de acesso do Cloudflare R2~~ **feito em 30/09** | A API de produção apontava para um bucket inexistente (`imob-media`) com uma chave sem acesso; nenhuma foto carregava. Agora `S3_BUCKET=sistema-imob` e chave nova com leitura e escrita só nesse bucket. Os arquivos das fotos antigas nunca existiram no R2: os 276 registros de foto sem arquivo (Alfa, Beta, Carlos) foram apagados pela API. Falta revogar o token `wandering-darkness-a06a` se não for usado | — |
 | 3.3 | **Remover o contêiner órfão da API** (`sistemaimob_api.1…` criado em 24/09) | Ficou rodando fora do Swarm; só recebe health check e ocupa ~60 MB | 5 min |
 | 3.4 | **Nunca rodar o seed em produção** a partir de agora | `seed.ts` começa com `TRUNCATE` de parceiros, usuários, imóveis e auditoria. Com o primeiro parceiro real, o seed apaga tudo | — |
 | 3.5 | Instalar o GitHub CLI (`gh`) e voltar ao fluxo de PR | O último merge na `main` foi feito direto, sem PR | 10 min |

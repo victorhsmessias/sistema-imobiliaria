@@ -1,11 +1,13 @@
 'use client';
 
 import type { ConnectionDto } from '@imob/contracts';
+import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
 import { Icon } from '@/components/Icon';
 import { apiFetch, ApiError } from '@/lib/api';
-import { formatArea, formatPrice } from '@/lib/format';
+import { formatArea } from '@/lib/format';
 import { CONNECTION_BADGE, CONNECTION_LABELS, TYPE_LABELS, plural } from '@/lib/labels';
+import { connectionPrice } from './price';
 import styles from './connections.module.css';
 
 type Role = 'received' | 'sent';
@@ -29,13 +31,6 @@ function remaining(iso: string): string {
   const days = Math.ceil((new Date(iso).getTime() - Date.now()) / 86_400_000);
   if (days <= 0) return 'vence hoje';
   return `vence em ${plural(days, 'dia', 'dias')}`;
-}
-
-function price(connection: ConnectionDto): string {
-  const { purpose, salePriceCents, rentPriceCents } = connection.listing;
-  if (purpose === 'rent') return formatPrice(rentPriceCents, 'rent');
-  const sale = formatPrice(salePriceCents, 'sale');
-  return purpose === 'sale_rent' ? `${sale} ou ${formatPrice(rentPriceCents, 'rent')}` : sale;
 }
 
 export function ConnectionsView() {
@@ -84,7 +79,7 @@ export function ConnectionsView() {
       <header className={styles.head}>
         <h1 className="page-title">Conexões</h1>
         <p className="lead">
-          Quem anuncia decide cada pedido. O contato só aparece depois do aceite.
+          Quem anuncia decide cada pedido. Depois do aceite, a conversa acontece aqui.
         </p>
       </header>
 
@@ -131,19 +126,34 @@ export function ConnectionsView() {
         {items.map((connection) => {
           const { listing } = connection;
           const busy = busyId === connection.id;
+          // Aprovada conversa; revogada guarda a conversa so para leitura.
+          const hasConversation = connection.status === 'approved' || connection.status === 'revoked';
 
           return (
             <li key={connection.id} className={styles.card}>
               <div className={styles.cardHead}>
                 <div>
-                  <span className={styles.place}>{listing.neighborhoodName}</span>
+                  {hasConversation ? (
+                    <Link href={`/conexoes/${connection.id}`} className={styles.place}>
+                      {listing.neighborhoodName}
+                    </Link>
+                  ) : (
+                    <span className={styles.place}>{listing.neighborhoodName}</span>
+                  )}
                   <span className={styles.city}>
                     {listing.cityName}/{listing.cityUf}
                   </span>
                 </div>
-                <span className={CONNECTION_BADGE[connection.status]}>
-                  {CONNECTION_LABELS[connection.status]}
-                </span>
+                <div className={styles.badges}>
+                  {connection.unreadCount > 0 && (
+                    <span className="badge badge-info">
+                      {plural(connection.unreadCount, 'nova', 'novas')}
+                    </span>
+                  )}
+                  <span className={CONNECTION_BADGE[connection.status]}>
+                    {CONNECTION_LABELS[connection.status]}
+                  </span>
+                </div>
               </div>
 
               <p className={styles.specs}>
@@ -151,7 +161,7 @@ export function ConnectionsView() {
                 {listing.bedrooms > 0 && ` · ${plural(listing.bedrooms, 'quarto', 'quartos')}`}
                 {listing.areaBuilt !== null && ` · ${formatArea(listing.areaBuilt)}`}
                 {` · `}
-                <strong className="num">{price(connection)}</strong>
+                <strong className="num">{connectionPrice(listing)}</strong>
               </p>
 
               {connection.message && <p className={styles.message}>“{connection.message}”</p>}
@@ -161,60 +171,14 @@ export function ConnectionsView() {
                 </p>
               )}
 
-              {/* Dono: quem está pedindo, desde o pedido. */}
-              {connection.requester && (
-                <dl className={styles.party}>
-                  <div>
-                    <dt>Parceiro</dt>
-                    <dd>{connection.requester.partnerName}</dd>
-                  </div>
-                  {connection.requester.brokerName && (
-                    <div>
-                      <dt>Corretor</dt>
-                      <dd>{connection.requester.brokerName}</dd>
-                    </div>
-                  )}
-                  {connection.requester.brokerPhone && (
-                    <div>
-                      <dt>Telefone</dt>
-                      <dd className="num">{connection.requester.brokerPhone}</dd>
-                    </div>
-                  )}
-                  {connection.requester.brokerEmail && (
-                    <div>
-                      <dt>E-mail</dt>
-                      <dd>{connection.requester.brokerEmail}</dd>
-                    </div>
-                  )}
-                </dl>
-              )}
-
-              {/* Solicitante: só existe depois do aceite. */}
-              {connection.disclosure && (
-                <dl className={`${styles.party} ${styles.revealed}`}>
-                  <div>
-                    <dt>Imobiliária</dt>
-                    <dd>{connection.disclosure.partnerName}</dd>
-                  </div>
-                  {connection.disclosure.brokerName && (
-                    <div>
-                      <dt>Corretor</dt>
-                      <dd>{connection.disclosure.brokerName}</dd>
-                    </div>
-                  )}
-                  {connection.disclosure.brokerPhone && (
-                    <div>
-                      <dt>Telefone</dt>
-                      <dd className="num">{connection.disclosure.brokerPhone}</dd>
-                    </div>
-                  )}
-                  {connection.disclosure.brokerEmail && (
-                    <div>
-                      <dt>E-mail</dt>
-                      <dd>{connection.disclosure.brokerEmail}</dd>
-                    </div>
-                  )}
-                </dl>
+              {/* A outra parte, so pela marca: contato nunca atravessa. */}
+              {connection.counterpart && (
+                <p className={styles.counterpart}>
+                  <span className={styles.counterpartLabel}>
+                    {connection.role === 'owner' ? 'Quem pediu' : 'Quem anuncia'}
+                  </span>
+                  {connection.counterpart.partnerName}
+                </p>
               )}
 
               <div className={styles.foot}>
@@ -253,6 +217,12 @@ export function ConnectionsView() {
                   >
                     Cancelar pedido
                   </button>
+                )}
+
+                {hasConversation && (
+                  <Link href={`/conexoes/${connection.id}`} className="btn btn-sm">
+                    {connection.status === 'approved' ? 'Abrir conversa' : 'Ver conversa'}
+                  </Link>
                 )}
               </div>
 

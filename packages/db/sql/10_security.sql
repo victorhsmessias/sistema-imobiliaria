@@ -189,6 +189,52 @@ CREATE POLICY connection_events_party_insert ON connection_events
   );
 -- Append-only: sem UPDATE e sem DELETE, como audit_log.
 
+-- Conversa da conexao. A leitura segue a da solicitacao (o EXISTS passa pela
+-- policy de connection_requests): quem nao ve a conexao nao ve a conversa.
+-- Escrever exige ser o remetente E a conexao estar APROVADA: revogada,
+-- recusada ou pendente fica barrada no banco, e nao so no service.
+ALTER TABLE connection_messages ENABLE ROW LEVEL SECURITY;
+ALTER TABLE connection_messages FORCE  ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS connection_messages_party_select ON connection_messages;
+CREATE POLICY connection_messages_party_select ON connection_messages
+  FOR SELECT
+  USING (
+    EXISTS (
+      SELECT 1 FROM connection_requests r
+       WHERE r.id = connection_messages.connection_request_id
+    )
+  );
+
+DROP POLICY IF EXISTS connection_messages_party_insert ON connection_messages;
+CREATE POLICY connection_messages_party_insert ON connection_messages
+  FOR INSERT
+  WITH CHECK (
+    sender_tenant_id = app_current_tenant()
+    AND EXISTS (
+      SELECT 1 FROM connection_requests r
+       WHERE r.id = connection_messages.connection_request_id
+         AND r.status = 'approved'
+    )
+  );
+-- Append-only: sem UPDATE e sem DELETE. A conversa e prova numa disputa.
+
+-- Ate onde cada imobiliaria leu. Cada lado so ve e grava a propria linha.
+ALTER TABLE connection_message_reads ENABLE ROW LEVEL SECURITY;
+ALTER TABLE connection_message_reads FORCE  ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS connection_message_reads_own ON connection_message_reads;
+CREATE POLICY connection_message_reads_own ON connection_message_reads
+  FOR ALL
+  USING (tenant_id = app_current_tenant())
+  WITH CHECK (
+    tenant_id = app_current_tenant()
+    AND EXISTS (
+      SELECT 1 FROM connection_requests r
+       WHERE r.id = connection_message_reads.connection_request_id
+    )
+  );
+
 
 -- ---------------------------------------------------------------------------
 -- RLS: audit_log  (append-only)
@@ -485,45 +531,43 @@ AS $$
     AND p.published_to_network;
 $$;
 
--- O que o DONO revela a quem pediu.
+-- O que o DONO revela a quem pediu: so a marca.
 --
--- As tres condicoes do WHERE sao a regra do produto, escrita no banco: a
--- conexao precisa estar APROVADA, e quem pergunta precisa ser o SOLICITANTE
--- daquela conexao. Uma consulta de qualquer outro lugar devolve zero linhas.
+-- Contato de pessoa (corretor, telefone, e-mail) nunca atravessa: a
+-- negociacao fica dentro da plataforma, por mensagens (spec de 28/09/2026).
+-- A marca aparece em conexao APROVADA e continua na REVOGADA, para a conversa
+-- so-leitura dizer com quem foi. Quem pergunta precisa ser o SOLICITANTE.
 --
 -- Nao devolve endereco: aprovar conexao nao e abrir o cadastro do imovel.
 CREATE FUNCTION connection_disclosure(p_request_id uuid)
-RETURNS TABLE (partner_name text, broker_name text, broker_phone text, broker_email text)
+RETURNS TABLE (partner_name text)
   LANGUAGE sql
   STABLE
   SECURITY DEFINER
   SET search_path = public, pg_temp
 AS $$
-  SELECT t.display_name, u.name, u.phone, u.email::text
+  SELECT t.display_name
   FROM connection_requests r
-  JOIN tenants t     ON t.id = r.owner_tenant_id
-  JOIN properties p  ON p.id = r.property_id
-  LEFT JOIN users u  ON u.id = coalesce(r.decided_by_user_id, p.created_by)
+  JOIN tenants t ON t.id = r.owner_tenant_id
   WHERE r.id = p_request_id
-    AND r.status = 'approved'
+    AND r.status IN ('approved', 'revoked')
     AND r.requester_tenant_id = app_current_tenant();
 $$;
 
--- Quem esta pedindo, para o DONO decidir.
+-- Quem esta pedindo, para o DONO decidir: so a marca.
 --
--- Disponivel desde a solicitacao, e nao apos aceite: pedir conexao e se
--- identificar. A assimetria e deliberada (ver schema/connections.ts).
+-- Disponivel desde a solicitacao: pedir conexao e se identificar como
+-- imobiliaria. Contato de pessoa nao atravessa, como no sentido contrario.
 CREATE FUNCTION connection_requester(p_request_id uuid)
-RETURNS TABLE (partner_name text, broker_name text, broker_phone text, broker_email text)
+RETURNS TABLE (partner_name text)
   LANGUAGE sql
   STABLE
   SECURITY DEFINER
   SET search_path = public, pg_temp
 AS $$
-  SELECT t.display_name, u.name, u.phone, u.email::text
+  SELECT t.display_name
   FROM connection_requests r
   JOIN tenants t ON t.id = r.requester_tenant_id
-  JOIN users u   ON u.id = r.requester_user_id
   WHERE r.id = p_request_id
     AND r.owner_tenant_id = app_current_tenant();
 $$;
@@ -678,6 +722,16 @@ GRANT SELECT, INSERT, UPDATE ON connection_requests TO app_user;
 REVOKE DELETE, TRUNCATE ON connection_requests FROM app_user;
 GRANT SELECT, INSERT ON connection_events TO app_user;
 REVOKE UPDATE, DELETE, TRUNCATE ON connection_events FROM app_user;
+
+-- Conversa: o REVOKE ALL vem primeiro porque os default privileges do
+-- bootstrap dao SELECT/INSERT/UPDATE/DELETE em toda tabela nova. O SELECT e
+-- por coluna: body_original fica de fora, e nem `SELECT *` passa.
+REVOKE ALL ON connection_messages FROM app_user;
+GRANT SELECT (id, connection_request_id, sender_tenant_id, sender_user_id, body, created_at)
+  ON connection_messages TO app_user;
+GRANT INSERT ON connection_messages TO app_user;
+REVOKE ALL ON connection_message_reads FROM app_user;
+GRANT SELECT, INSERT, UPDATE ON connection_message_reads TO app_user;
 
 -- Auditoria: so escreve e le. Nunca altera nem apaga.
 GRANT SELECT, INSERT ON audit_log TO app_user;

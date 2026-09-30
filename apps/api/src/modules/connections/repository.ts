@@ -1,7 +1,10 @@
 import type { ConnectionStatus } from '@imob/contracts';
 import {
   and,
+  asc,
   connectionEvents,
+  connectionMessageReads,
+  connectionMessages,
   connectionRequests,
   count,
   desc,
@@ -135,20 +138,6 @@ export async function listEvents(tx: Tx, connectionRequestId: string) {
     .orderBy(connectionEvents.createdAt);
 }
 
-export async function hasDisclosureEvent(tx: Tx, connectionRequestId: string): Promise<boolean> {
-  const rows = await tx
-    .select({ id: connectionEvents.id })
-    .from(connectionEvents)
-    .where(
-      and(
-        eq(connectionEvents.connectionRequestId, connectionRequestId),
-        eq(connectionEvents.type, 'disclosed'),
-      ),
-    )
-    .limit(1);
-  return rows.length > 0;
-}
-
 export interface ListingRow {
   listing_id: string;
   type: string;
@@ -184,22 +173,19 @@ export async function listingsOf(tx: Tx, requestIds: string[]): Promise<Map<stri
 
 export interface PartyRow {
   partner_name: string;
-  broker_name: string | null;
-  broker_phone: string | null;
-  broker_email: string | null;
 }
 
-/** Quem pediu, para o dono. Devolve vazio se quem pergunta nao e o dono. */
+/** Marca de quem pediu, para o dono. Vazio se quem pergunta nao e o dono. */
 export async function requesterOf(tx: Tx, requestId: string): Promise<PartyRow | null> {
   const { rows } = await tx.execute(sql`SELECT * FROM connection_requester(${requestId}::uuid)`);
   return (rows[0] as PartyRow | undefined) ?? null;
 }
 
 /**
- * Dados do dono, para quem pediu.
+ * Marca do dono, para quem pediu.
  *
- * Devolve vazio se a conexao nao esta aprovada ou se quem pergunta nao e o
- * solicitante -- a regra vive na funcao, no banco.
+ * Vazio se a conexao nao esta aprovada nem revogada, ou se quem pergunta nao
+ * e o solicitante -- a regra vive na funcao, no banco.
  */
 export async function disclosureOf(tx: Tx, requestId: string): Promise<PartyRow | null> {
   const { rows } = await tx.execute(sql`SELECT * FROM connection_disclosure(${requestId}::uuid)`);
@@ -262,4 +248,136 @@ export async function revokeApproved(
         wasApproved: row.was_approved,
       }
     : null;
+}
+
+/**
+ * Colunas da conversa que a aplicacao pode ler.
+ *
+ * `body_original` fica de fora de proposito: o app_user nao tem SELECT nela
+ * (grant por coluna em sql/10_security.sql). Um `select()` sem esta lista
+ * pediria todas as colunas e morreria com permission denied.
+ */
+const messageColumns = {
+  id: connectionMessages.id,
+  senderTenantId: connectionMessages.senderTenantId,
+  body: connectionMessages.body,
+  createdAt: connectionMessages.createdAt,
+};
+
+export interface MessageRow {
+  id: string;
+  senderTenantId: string;
+  body: string;
+  createdAt: Date;
+}
+
+export async function insertMessage(
+  tx: Tx,
+  values: {
+    connectionRequestId: string;
+    senderTenantId: string;
+    senderUserId: string;
+    body: string;
+    bodyOriginal: string | null;
+  },
+): Promise<MessageRow> {
+  const rows = await tx.insert(connectionMessages).values(values).returning(messageColumns);
+  const row = rows[0];
+  if (!row) throw new Error('insert de mensagem nao devolveu linha');
+  return row;
+}
+
+/** A mensagem, se ela for DESTA conexao. Serve de cursor para `after`. */
+export async function findMessage(
+  tx: Tx,
+  connectionRequestId: string,
+  messageId: string,
+): Promise<MessageRow | null> {
+  const rows = await tx
+    .select(messageColumns)
+    .from(connectionMessages)
+    .where(
+      and(
+        eq(connectionMessages.id, messageId),
+        eq(connectionMessages.connectionRequestId, connectionRequestId),
+      ),
+    )
+    .limit(1);
+  return rows[0] ?? null;
+}
+
+/** As mais recentes primeiro. Quem chama inverte para a ordem da conversa. */
+export async function latestMessages(tx: Tx, connectionRequestId: string, limit: number): Promise<MessageRow[]> {
+  return tx
+    .select(messageColumns)
+    .from(connectionMessages)
+    .where(eq(connectionMessages.connectionRequestId, connectionRequestId))
+    .orderBy(desc(connectionMessages.createdAt), desc(connectionMessages.id))
+    .limit(limit);
+}
+
+/**
+ * As posteriores ao cursor, em ordem crescente.
+ *
+ * A comparacao le o cursor NO BANCO: created_at tem microssegundos e o Date
+ * do JS so milissegundos. Comparar com o valor que passou pelo JS devolveria
+ * a propria mensagem do cursor em toda atualizacao.
+ */
+export async function messagesAfter(
+  tx: Tx,
+  connectionRequestId: string,
+  afterId: string,
+  limit: number,
+): Promise<MessageRow[]> {
+  return tx
+    .select(messageColumns)
+    .from(connectionMessages)
+    .where(
+      and(
+        eq(connectionMessages.connectionRequestId, connectionRequestId),
+        sql`(${connectionMessages.createdAt}, ${connectionMessages.id}) >
+            (SELECT c.created_at, c.id FROM connection_messages c WHERE c.id = ${afterId}::uuid)`,
+      ),
+    )
+    .orderBy(asc(connectionMessages.createdAt), asc(connectionMessages.id))
+    .limit(limit);
+}
+
+/** Marca a conversa como lida ate agora, pelo lado deste parceiro. */
+export async function markRead(tx: Tx, connectionRequestId: string, tenantId: string): Promise<void> {
+  await tx
+    .insert(connectionMessageReads)
+    .values({ connectionRequestId, tenantId, lastReadAt: sql`now()` })
+    .onConflictDoUpdate({
+      target: [connectionMessageReads.connectionRequestId, connectionMessageReads.tenantId],
+      set: { lastReadAt: sql`now()` },
+    });
+}
+
+/**
+ * Nao lidas por conexao, numa consulta so para a lista inteira.
+ *
+ * Conta so o que veio da OUTRA parte, depois da ultima leitura deste lado.
+ * Sem linha de leitura, tudo o que a outra parte mandou conta.
+ */
+export async function unreadCounts(
+  tx: Tx,
+  tenantId: string,
+  requestIds: string[],
+): Promise<Map<string, number>> {
+  if (requestIds.length === 0) return new Map();
+
+  const { rows } = await tx.execute(sql`
+    SELECT m.connection_request_id AS id, count(*)::int AS unread
+      FROM connection_messages m
+      LEFT JOIN connection_message_reads r
+        ON r.connection_request_id = m.connection_request_id
+       AND r.tenant_id = ${tenantId}::uuid
+     WHERE m.connection_request_id = ANY(${sql.param(requestIds)}::uuid[])
+       AND m.sender_tenant_id <> ${tenantId}::uuid
+       AND (r.last_read_at IS NULL OR m.created_at > r.last_read_at)
+     GROUP BY m.connection_request_id
+  `);
+
+  return new Map((rows as unknown as Array<{ id: string; unread: number }>).map((row) => [row.id, row.unread]));
 }

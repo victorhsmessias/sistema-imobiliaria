@@ -58,6 +58,8 @@ const FORCED_TABLES = [
   'import_items',
   'connection_requests',
   'connection_events',
+  'connection_messages',
+  'connection_message_reads',
 ];
 const RLS_TABLES = [...FORCED_TABLES, 'users', 'tenants', 'audit_log'];
 
@@ -98,6 +100,16 @@ async function verify(pool: import('pg').Pool): Promise<void> {
           'Com o dono errado ela nao atravessa o RLS e a busca da rede volta vazia.',
       );
     }
+  }
+
+  // O original de uma mensagem mascarada nao pode ser legivel pela aplicacao.
+  // Um GRANT SELECT na tabela inteira (ou um default privilege esquecido)
+  // devolveria o telefone que a mascara tirou -- e nada falharia.
+  const original = await pool.query<{ allowed: boolean }>(
+    `SELECT has_column_privilege('app_user', 'connection_messages', 'body_original', 'SELECT') AS allowed`,
+  );
+  if (original.rows[0]?.allowed) {
+    throw new Error('[migrate] app_user consegue ler connection_messages.body_original.');
   }
 
   for (const row of forced.rows) {
